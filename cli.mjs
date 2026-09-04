@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [command, ...rest] = process.argv.slice(2);
 
-const help = `Marginalia CLI
+const help = `CoEditor CLI
 
   open <folder> [--port 4400]      启动本地批注层网页服务
   constraints <folder> <doc>       输出该文档当前生效的约束批注（给 Agent 用）
@@ -17,7 +17,7 @@ const help = `Marginalia CLI
   mcp <folder>                     以 stdio 启动 MCP server（供 claude mcp add 使用）
 
 接入 MCP：
-  claude mcp add marginalia -- node ${join(HERE, "mcp-stdio.mjs")} <vault 绝对路径>
+  claude mcp add coeditor -- node ${join(HERE, "mcp-stdio.mjs")} <vault 绝对路径>
 
 示例：
   node cli.mjs open ~/Documents/thesis
@@ -179,7 +179,7 @@ if (command === "open") {
   const port = portIndex >= 0 ? rest[portIndex + 1] : "4400";
   spawn(process.execPath, [join(HERE, "server.mjs"), resolve(folder)], {
     stdio: "inherit",
-    env: { ...process.env, MARGINALIA_PORT: port },
+    env: { ...process.env, COEDITOR_PORT: port },
   });
 } else if (command === "constraints") {
   const flags = { json: rest.includes("--json") };

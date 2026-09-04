@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 const ROOT = resolve(process.argv[2] || process.cwd());
-const PORT = Number(process.env.MARGINALIA_PORT || 4400);
+const PORT = Number(process.env.COEDITOR_PORT || 4400);
 const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
@@ -497,7 +497,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Marginalia ready → http://127.0.0.1:${PORT}`);
+  console.log(`CoEditor ready → http://127.0.0.1:${PORT}`);
   console.log(`vault: ${ROOT}`);
   console.log(`sidecar: ${SIDECAR}`);
 });

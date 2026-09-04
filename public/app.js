@@ -527,7 +527,7 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
   if (!openDrawer) return { saved, listed };
 
   const lines = [
-    "[@Marginalia] 按标注修改图片",
+    "[@CoEditor] 按标注修改图片",
     "",
     `源图：${state.path}`,
     `标注截图：${saved.rel}`,
@@ -570,7 +570,7 @@ async function askEditWithAnnotations() {
   const canvasArrows = state.arrows.filter((item) => ownsCanvas(item) && (item.label || "").trim());
   const canvasNotes = state.notes.filter((item) => ownsCanvas(item) && (item.text || "").trim());
   const lines = [
-    `[@Marginalia] 按标注修改 ${state.path}`,
+    `[@CoEditor] 按标注修改 ${state.path}`,
     "",
     "请根据这份文档的人类批注修改它：",
     `- 目标文件：${state.path}`,

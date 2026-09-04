@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Marginalia MCP stdio server —— 零依赖手写 JSON-RPC 2.0
-// 接入：claude mcp add marginalia -- node /abs/path/mcp-stdio.mjs /abs/vault
+// CoEditor MCP stdio server —— 零依赖手写 JSON-RPC 2.0
+// 接入：claude mcp add coeditor -- node /abs/path/mcp-stdio.mjs /abs/vault
 import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
@@ -40,7 +40,7 @@ async function loadAnnotations(doc) {
 const TOOLS = [
   {
     name: "list_documents",
-    description: "列出 Marginalia 库中所有可批注的文档（相对路径）",
+    description: "列出 CoEditor 库中所有可批注的文档（相对路径）",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -92,7 +92,7 @@ const TOOLS = [
   {
     name: "insert_asset",
     description:
-      "把生成的产物（新版本图片/文本片段）写入 Marginalia 库。遵守 Cowart 哲学：新产物放旁边，永不覆盖原件。返回文件在网页中的相对路径；人刷新文件树即可看到。",
+      "把生成的产物（新版本图片/文本片段）写入 CoEditor 库。遵守 Cowart 哲学：新产物放旁边，永不覆盖原件。返回文件在网页中的相对路径；人刷新文件树即可看到。",
     inputSchema: {
       type: "object",
       properties: {
@@ -445,7 +445,7 @@ async function handleRequest(message) {
       return {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "marginalia", version: "0.2.0" },
+        serverInfo: { name: "coeditor", version: "0.2.0" },
       };
     }
     if (message.method === "tools/list") {

@@ -1,6 +1,6 @@
-# Marginalia · v0.4.0（M1 / M1.5 / M2 / M3 / M4 全部完结）
+# CoEditor · v0.5.0（M1 / M1.5 / M2 / M3 / M4 全部完结）
 
-零依赖（只用 Node 内置模块 + 原生前端），画布式本地文档批注层：人在网页上写字，批注按原文位置落锚、永不删除，Agent 改文档时自动重定位，批注作为**约束**回流给 Agent。**M4 起，画布交互对齐 Cowart（手绘标注箭头 / 便签 / 贴图 / 一键按标注修改）。**
+零依赖（只用 Node 内置模块 + 原生前端），画布式本地文档批注层：人在网页上写字，批注按原文位置落锚、永不删除，Agent 改文档时自动重定位，批注作为**约束**回流给 Agent。**M4 起，画布交互对齐 Cowart（手绘标注箭头 / 便签 / 贴图 / 一键按标注修改）。** 数据目录沿用 `.marginalia/`（历史约定，纯 JSON 可 git 管理）。
 
 ![Cowart 交互模式](docs/screenshots/cowart-mode.png)
 
@@ -8,16 +8,16 @@
 
 ```bash
 # 方式一：clone 后直接跑（推荐，零依赖）
-git clone <repo> marginalia && cd marginalia
+git clone <repo> coeditor && cd coeditor
 node cli.mjs open ./sample          # 默认 http://127.0.0.1:4400
 node cli.mjs open ~/Documents/thesis --port 4401
 
 # 方式二：作为全局命令（需 node ≥ 18）
 npm link
-marginalia open ~/Documents/thesis
+coeditor open ~/Documents/thesis
 
 # 方式三：一次性跑（发布到 npm 后可用 npx）
-npx marginalia open ~/Documents/thesis
+npx coeditor open ~/Documents/thesis
 ```
 
 深链直达文档（Agent 可直接打开）：
@@ -41,7 +41,7 @@ http://127.0.0.1:4400/?doc=研究设计笔记.md
 
 ## Agent 双向通道（M4 · 对齐 Cowart MCP 能力面）
 
-| Cowart | Marginalia 对应 |
+| Cowart | CoEditor 对应 |
 |---|---|
 | `get_cowart_canvas_state` | `get_canvas_state` — 画布全貌（箭头/便签/图卡/草稿卡，可按文档过滤） |
 | `get_cowart_selection` | `get_ui_state` — 人当前打开的文档与选中的元素（网页实时上报） |
@@ -65,7 +65,7 @@ node cli.mjs conflicts ./sample 研究设计笔记.md     # 未裁定冲突
 curl "http://127.0.0.1:4400/api/constraints?p=研究设计笔记.md"
 
 # 3. MCP（Claude Code / Codex 等）
-claude mcp add marginalia -- node /abs/path/marginalia/mcp-stdio.mjs /abs/path/vault
+claude mcp add coeditor -- node /abs/path/coeditor/mcp-stdio.mjs /abs/path/vault
 # 工具：list_documents / read_document / list_annotations /
 #       get_active_constraints（修改前必调）/ get_annotation_context /
 #       list_annotation_exports（取标注图）/ insert_asset（产物入 vault）/
