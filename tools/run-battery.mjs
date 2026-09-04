@@ -41,7 +41,7 @@ execFileSync(process.execPath, [path.join(HERE, "make-long-pdf.mjs")], { stdio: 
 
 // 起隔离服务
 const server = spawn(process.execPath, [path.join(ROOT, "server.mjs"), VAULT], {
-  env: { ...process.env, COEDITOR_PORT: String(PORT) },
+  env: { ...process.env, COEDITOR_PORT: String(PORT), COEDITOR_DISABLE_NATIVE_PICKER: "1" },
   stdio: "ignore",
 });
 let ready = false;
@@ -53,13 +53,14 @@ console.log(`\n🧪 CoEditor 测试电池 → ${BASE}（vault: ${VAULT}）\n`);
 
 // 套件清单：[名称, 脚本, 通过判据(对 stdout 的正则数组, 条数为出现次数下限)]
 const suites = [
-  ["真实输入：md/PDF 选区·高亮·编辑·文件夹选择器", "eval-real-input.mjs", [["noPan\": true", 1], ["menuShown\": true", 2], ["markInDoc\": true", 1], ["editing\": true", 1], ["fsClosed\": true", 1]]],
+  ["真实输入：md/PDF 选区·保留·编辑·文件夹选择器", "eval-real-input.mjs", [["noPan\": true", 1], ["menuShown\": true", 2], ["markInDoc\": true", 1], ["noConnector\": true", 1], ["visibleNoPattern\": true", 1], ["retainLabel\": true", 1], ["textLayerTransparent\": true", 1], ["editing\": true", 1], ["fsClosed\": true", 1]]],
   ["PDF 区域框选：拖框→面板→保存→切列复位", "eval-pdf-region.mjs", [["shown\": true", 1], ["overlaySurvivesCols\": true", 1], ["lineDrawn\": true", 1]]],
   ["格式选区：docx / HTML", "eval-formats.mjs", [["menuShown\": true", 2]]],
-  ["画布工具：箭头 / 便签 / 白板", "eval-canvas-tools.mjs", [["arrowCreated\": true", 1], ["noteCreated\": true", 1], ["boardCreated\": true", 1]]],
+  ["画布工具：箭头 / 图片独立拖动 / 工具条固定", "eval-canvas-tools.mjs", [["arrowCreated\": true", 1], ["imageMoved\": true", 1], ["canvasStayed\": true", 1], ["storedMove\": true", 1], ["toolboxCentered\": true", 1], ["toolboxAtBottom\": true", 1], ["obsoleteToolsGone\": true", 1]]],
   ["PDF 长文档按需渲染", "eval-pdf-lazy.mjs", [["lazyWorked\": true", 1], ["textComplete\": true", 1]]],
   ["HTML 双击直改：写回纯净 + 批注重锚定", "eval-html-inline-edit.mjs", [["panelShown\": true", 1], ["fileHasNewText\": true", 1], ["noRawUrl\": true", 1], ["annotationReanchored\": true", 1], ["restored\": true", 1]]],
   ["vault 切换守卫：不虚推进批次", "eval-vault-guard.mjs", [["guardWorked\": true", 1]]],
+  ["v0.9：树折叠 / 批注编辑删除 / 图片区域防重复", "eval-v09.mjs", [["treeCollapsed\": true", 1], ["visibleNoPattern\": true", 1], ["displayNoMatchesApi\": true", 1], ["editOpened\": true", 1], ["editPersisted\": true", 1], ["deletePersisted\": true", 1], ["oneRegionCreated\": true", 1], ["oneRegionBox\": true", 1], ["oneRegionLine\": true", 1], ["canvasDeleteWorked\": true", 1]]],
 ];
 
 const results = [];

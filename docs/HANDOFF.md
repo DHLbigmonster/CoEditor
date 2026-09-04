@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v0.8.1 · 2026-09-04
+> 最后更新：v0.9.0 · 2026-09-04
 
 ## 产品一句话
 
@@ -21,13 +21,17 @@
 
 ## 关键设计决策（动代码前必读）
 
-1. **sidecar 是唯一事实源，四层防护**：防破坏守卫（集合只增不减）/ 读失败拒绝写（ENOENT 与读失败分流）/ mtime 乐观锁 / 写前 `.prev` 备份。任何新写入方必须走 `writeSidecar`。
+1. **sidecar 是唯一事实源，四层防护**：防破坏守卫（集合不可无故减少）/ 读失败拒绝写（ENOENT 与读失败分流）/ mtime 乐观锁 / 写前 `.prev` 备份。用户显式删除时必须通过 `allowedRemovals` / `allowedCanvasRemovals` 精确放行一个目标；任何新写入方必须走 `writeSidecar`。
 2. **三模式**：`state.workspaceMode`（read/edit/canvas）。阅读=自然文档流（`body:not([data-workspace-mode="canvas"])` CSS 分支）；画布=transform 世界坐标。`toWorld/worldRect/zoomAt/centerOn/fit` 都有双模式分支——**改坐标逻辑必须两个分支都改**。
 3. **HTML 是双树**：`buildHtmlCoedit` 返回 `{ html, original, map }`。original 保真（脚本/URL 原样）负责写回；preview 带脚本中和 + URL 改写 + `data-coedit` 路径标记。**直改保存只写 original 序列化**——绝不能序列化 preview（会把 /api/raw 代理地址写进源文件）。
 4. **事件契约**：`#page mouseup` 只在 `pending` 存在时 `stopPropagation`（否则会拦掉 region 拖框等 window 级监听——v0.7.2 踩过）。工具激活时（canvasTool!=="select"）浮条逻辑让路。
 5. **PDF 文本层即时、画布惰性**：锚定/提取/批注不依赖 canvas 绘制。改渲染逻辑不要把 render 提前到全量。
 6. **批次只由人推进**（完成本轮批注按钮）：外部文件变化只重锚定。**绝不自动推进**。
 7. **外部修改感知先验 vault**：`GET /api/vault` 比对后才比 mtime（防同相对路径误读别的目录——真实事故 2 秒虚推 7 轮）。
+8. **双编号兼容**：`id=A-xxxx` 是稳定内部主键，`no=round-seq` 是唯一面向人和 Agent 的显示号。不得把内部 ID 重新暴露到 UI。
+9. **保留语义**：历史数据仍使用 `kind=highlight`，产品文案统一为「保留」。PDF 文本层 `.anchor` 的文字必须透明，避免覆盖 canvas 原字；保留不画 connector。
+10. **画布事件隔离**：区域与图卡使用 pointer capture；图卡 `pointerdown` 必须阻止 viewport 的兼容 mousedown 平移。图片 load 后必须重跑 `renderRegions/drawLines`。
+11. **旧便签/白板只兼容数据**：入口、渲染、Agent 约束与 Canvas 导出都已移除，不要恢复为默认功能。
 
 ## 测试电池（发布门禁）
 
@@ -37,10 +41,10 @@
   --user-data-dir=/tmp/marginalia-cdp-profile --no-first-run --no-sandbox --disable-setuid-sandbox \
   --disable-dev-shm-usage --disable-gpu about:blank &
 
-node tools/run-battery.mjs   # 退出码 0 = 7/7 全绿可发布
+node tools/run-battery.mjs   # 退出码 0 = 8/8 全绿可发布
 ```
 
-- 自动备隔离 vault（副本的副本，**绝不写用户 sample**）→ 隔离端口 4401 → 顺序跑 7 套真实 CDP 鼠标 E2E → ✅/❌ 汇总。
+- 自动备隔离 vault（副本的副本，**绝不写用户 sample**）→ 隔离端口 4401 → 顺序跑 8 套真实 CDP 鼠标 E2E → ✅/❌ 汇总。
 - 单套件可独立跑：`COEDITOR_E2E_BASE=http://127.0.0.1:4401 COEDITOR_E2E_COPY=<vault副本> node tools/eval-xxx.mjs`
 - **E2E 幂等两坑**：同一 vault 重复运行落点要随机偏移（旧元素拦截点击）；连续放置元素间距 > 元素尺寸。
 - **CDP 调试**：`Runtime.evaluate` 取值路径是 `ev.result.value`；`exceptionDetails` 在响应顶层；iframe 内 DOM 对父文档 querySelectorAll 不可见，必须 `frame.contentDocument`。

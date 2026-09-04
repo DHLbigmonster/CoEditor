@@ -23,7 +23,7 @@
     <div id="tree" class="tree"></div>
   </div>
   <div class="rail-foot">
-    <div class="stat"><span id="stat-count">0</span> 条批注 · <span id="stat-active">0</span> 生效</div>
+    <div class="stat"><span id="stat-count">0</span> 条批注 · <span id="stat-active">0</span> 当前</div>
     <div class="hint">Agent 读取：<code id="api-hint">/api/constraints</code></div>
   </div>
 </aside>
@@ -40,7 +40,7 @@
         <button data-workspace-mode="canvas">画布</button>
       </span>
       <button id="btn-round" class="chip" title="明确结束本轮批注，并开启下一轮；外部文件变化不会自动推进轮次">完成本轮批注</button>
-      <button id="btn-edit-ask" class="chip ask" title="汇总当前批注、箭头和便签，生成可交给 Agent 的修改任务">交给 Agent</button>
+      <button id="btn-edit-ask" class="chip ask" title="汇总当前批注与画布箭头，生成可交给 Agent 的修改任务">交给 Agent</button>
       <button id="btn-drawer" class="chip">批注</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
@@ -58,7 +58,7 @@
         <summary class="icon" title="更多视图选项">•••</summary>
         <div class="view-menu-panel">
           <button id="btn-layout" class="menu-action" title="把画布上的批注卡重新排列到对应原文旁边">重置画布布局</button>
-          <button id="btn-focus" class="menu-action" data-on="1">批注：仅生效</button>
+          <button id="btn-focus" class="menu-action" data-on="1">批注：当前</button>
           <button id="btn-lines" class="menu-action" data-on="0" title="自动时只显示当前批注的连接线">连接线：自动</button>
           <button id="btn-theme" class="menu-action" title="切换纸张明暗">纸张：明亮</button>
         </div>
@@ -83,14 +83,8 @@
       <button class="tool" data-tool="arrow" title="标注箭头：按住拖画，松手即成（A）">
         <svg viewBox="0 0 20 20"><path d="M3 15 Q 9 14, 14.5 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M11.4 6.4 L15.6 6.2 L14.2 10.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="tool" data-tool="note" title="便签：点击画布放置（N）">
-        <svg viewBox="0 0 20 20"><path d="M4 4 h12 v8 l-4 4 h-8 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 16 v-4 h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      </button>
       <button class="tool" data-tool="image" title="贴图：选择图片 / 拖入 / 粘贴到画布（I）">
         <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="7.2" cy="8" r="1.4" fill="currentColor"/><path d="M4 14 L9 9.5 L12.5 12.5 L15 10.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="tool" data-tool="board" title="白板：点击画布放置一块可写的白板（W）">
-        <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 14 v3 M7 17 h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
       <button class="tool" data-tool="region" title="区域批注：在 PDF 页上拖拽框选一块区域加批注（R）">
         <svg viewBox="0 0 20 20"><rect x="4" y="5" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.4"/></svg>
@@ -116,16 +110,14 @@
           <tr><td>阅读 / 编辑</td><td>Markdown、HTML 可切换源码编辑（⌘S 保存）</td></tr>
           <tr><td>双击 HTML 段落</td><td>直接改文字（阅读模式，写回源文件，URL 与脚本原样保留）</td></tr>
           <tr><td><kbd>⌘F</kbd></td><td>编辑模式内搜索（Enter 下一个 / Shift+Enter 上一个）</td></tr>
-          <tr><td>选中文字</td><td>弹出菜单：批注 / 高亮 / 删除线</td></tr>
+          <tr><td>选中文字</td><td>弹出菜单：批注 / 保留 / 删除线</td></tr>
           <tr><td><kbd>V</kbd></td><td>选择 / 平移</td></tr>
           <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>
-          <tr><td><kbd>N</kbd></td><td>便签（点击画布放置）</td></tr>
-          <tr><td><kbd>W</kbd></td><td>白板（点击画布放置，草稿区不计入约束）</td></tr>
           <tr><td><kbd>R</kbd></td><td>区域批注（在 PDF 页上拖拽框选，苹果预览式）</td></tr>
           <tr><td><kbd>I</kbd></td><td>贴图（也可拖图 / ⌘V 粘贴进画布）</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>回选择工具 / 取消输入</td></tr>
-          <tr><td><kbd>Delete</kbd></td><td>删除选中的箭头 / 便签 / 图卡 / 草稿卡</td></tr>
-          <tr><td>双击画布元素</td><td>改箭头标签 / 编辑便签</td></tr>
+          <tr><td><kbd>Delete</kbd></td><td>删除选中的箭头 / 图卡 / 草稿卡</td></tr>
+          <tr><td>双击箭头</td><td>修改箭头标签</td></tr>
           <tr><td>⌘+滚轮</td><td>缩放 · 拖拽空白处平移</td></tr>
         </table>
       </div>
@@ -144,13 +136,13 @@
 
 <div id="sel-menu" hidden>
   <button data-sel-act="comment" title="写批注（保留编号，成为 Agent 约束）">批注</button>
-  <button data-sel-act="highlight" title="高亮标记：给这段文字上色，Agent 可感知">高亮</button>
+  <button data-sel-act="highlight" title="保留：标记这段内容很好，写回时必须保留（正文黄底，无牵引线）">保留</button>
   <button data-sel-act="strike" title="删除线：标记建议删除此段">删除线</button>
 </div>
 
 <div id="composer" hidden>
   <div class="c-quote" id="composer-quote"></div>
-  <textarea id="composer-input" rows="3" placeholder="写下这条批注 —— 它会永久保留并编号，成为 Agent 的约束"></textarea>
+  <textarea id="composer-input" rows="3" placeholder="写下这条批注 —— 它会按批次编号，成为 Agent 的约束"></textarea>
   <div class="c-foot">
     <span class="c-tip">⌘/Ctrl + Enter 保存</span>
     <div>

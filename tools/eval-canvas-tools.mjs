@@ -1,87 +1,112 @@
-// 画布工具 E2E：三模式重构后箭头 / 便签 / 白板的回归验证（真实鼠标事件 + sidecar 落盘）
+// 画布工具 E2E：保留必要工具，并验证图片拖动不会带动画布（真实鼠标事件 + sidecar 落盘）
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 import { readFileSync } from "node:fs";
+
+const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
+const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery";
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").includes("4401"));
-if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json(); }
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith(BASE));
+if (!page) page = await (await fetch(`http://127.0.0.1:9333/json/new?${BASE}`, { method: "PUT" })).json();
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
-let id = 0; const pm = new Map();
-const send = (m, p = {}) => new Promise((res, rej) => { const k = ++id; pm.set(k, { res, rej }); ws.send(JSON.stringify({ id: k, method: m, params: p })); });
-ws.on("message", (d) => { const m = JSON.parse(d); if (m.id && pm.has(m.id)) { const p = pm.get(m.id); pm.delete(m.id); m.error ? p.rej(new Error(JSON.stringify(m.error))) : p.res(m.result); } });
-await new Promise((r) => ws.on("open", r));
-const evalv = async (expr) => {
-  const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-  if (ev.exceptionDetails) throw new Error("eval: " + JSON.stringify(ev.exceptionDetails.exception || ev.exceptionDetails).slice(0, 300));
-  return ev.result ? ev.result.value : undefined;
+let id = 0; const pending = new Map();
+const send = (method, params = {}) => new Promise((resolve, reject) => {
+  const callId = ++id; pending.set(callId, { resolve, reject });
+  ws.send(JSON.stringify({ id: callId, method, params }));
+});
+ws.on("message", (data) => {
+  const message = JSON.parse(data);
+  if (!message.id || !pending.has(message.id)) return;
+  const call = pending.get(message.id); pending.delete(message.id);
+  message.error ? call.reject(new Error(JSON.stringify(message.error))) : call.resolve(message.result);
+});
+await new Promise((resolve) => ws.on("open", resolve));
+await send("Page.enable");
+await send("Runtime.enable");
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const evaluate = async (expression) => {
+  const value = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails).slice(0, 500));
+  return value.result?.value;
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const realDrag = async (x1, y1, x2, y2) => {
+const drag = async (x1, y1, x2, y2) => {
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x: Math.round(x1), y: Math.round(y1), button: "left", buttons: 1, clickCount: 1 });
-  for (let i = 1; i <= 8; i += 1) {
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(x1 + ((x2 - x1) * i) / 8), y: Math.round(y1 + ((y2 - y1) * i) / 8), button: "left", buttons: 1 });
+  for (let step = 1; step <= 10; step += 1) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(x1 + (x2 - x1) * step / 10), y: Math.round(y1 + (y2 - y1) * step / 10), button: "left", buttons: 1 });
   }
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x2), y: Math.round(y2), button: "left", buttons: 0, clickCount: 1 });
 };
-const realClick = async (x, y) => {
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: Math.round(x), y: Math.round(y), button: "left", buttons: 1, clickCount: 1 });
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x), y: Math.round(y), button: "left", buttons: 0, clickCount: 1 });
-};
+const sidecar = () => JSON.parse(readFileSync(`${VAULT}/.marginalia/annotations.json`, "utf8"));
 
-const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-m7-vault";
-const sidecar = () => {
-  const s = JSON.parse(readFileSync(`${VAULT}/.marginalia/annotations.json`, "utf8"));
-  return { arrows: s.arrows.length, notes: s.notes.length, boards: s.notes.filter((n) => n.type === "board").length };
-};
+await send("Page.navigate", { url: `${BASE}/?doc=${encodeURIComponent("配图-数字化与坪效.png")}` });
+await sleep(1800);
+await evaluate(`setWorkspaceMode("canvas")`);
+await sleep(650);
+
 const before = sidecar();
-
-// 打开 md 文档 → 切画布模式
-await send("Page.navigate", { url: "http://127.0.0.1:4401/?doc=" + encodeURIComponent("研究设计笔记.md") });
-await sleep(2400);
-await evalv(`setWorkspaceMode('canvas')`);
-await sleep(600);
-// 画布空白区域坐标（视口右上方向，避开页面与卡片）
-const spot = await evalv(`(() => {
-  const vp = document.getElementById("viewport").getBoundingClientRect();
-  const jit = (n) => Math.floor(Math.random() * n * 2) - n; // 随机偏移：脚本可在同一 vault 上重复运行
-  return { x: vp.left + vp.width - 120 + jit(120), y: vp.top + 170 + jit(90) };
+const spot = await evaluate(`(() => {
+  const viewport = document.getElementById("viewport").getBoundingClientRect();
+  const blocked = (element) => element && element.closest && element.closest('.card,.image-card,.draft-card,#page,#composer,.arrow-g,#toolbox');
+  for (let y = viewport.top + 80; y < viewport.bottom - 100; y += 70) {
+    for (let x = viewport.left + 18; x < viewport.right - 150; x += 70) {
+      if (!blocked(document.elementFromPoint(x, y))) return { x, y };
+    }
+  }
+  return { x: viewport.left + 18, y: viewport.top + 90 };
 })()`);
 
-/* ① 箭头（A 工具真实拖画，含标签弹层） */
-await evalv(`setTool('arrow')`);
-await realDrag(spot.x - 60, spot.y, spot.x + 60, spot.y + 40);
-await sleep(450);
-// 建完即弹标签编辑器：输入文字回车
-const labelShown = await evalv(`(() => ({ editor: !document.getElementById("arrow-label-editor").hidden }))()`);
-if (labelShown.editor) {
-  await evalv(`(() => { const i = document.getElementById("arrow-label-input"); i.value = "这一列要强调口径来源"; return 1; })()`);
+// 箭头仍保留：按 Cowart 的 pointer 手势真实拖画，完成后输入标签。
+await evaluate(`setTool("arrow")`);
+await drag(spot.x, spot.y, spot.x + 110, spot.y + 34);
+await sleep(350);
+const labelShown = await evaluate(`!document.getElementById("arrow-label-editor").hidden`);
+if (labelShown) {
+  await evaluate(`document.getElementById("arrow-label-input").value = "需要强调"`);
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-  await sleep(600);
+  await sleep(650);
 }
-const afterArrow = sidecar();
 
-/* ② 便签（N 工具点击放置） */
-await evalv(`setTool('note')`);
-await realClick(spot.x - 200, spot.y + 150);
-await sleep(600);
-const afterNote = sidecar();
+// 拖动画布图卡：图卡要移动，world transform 必须原封不动。
+await evaluate(`setTool("select")`);
+const imageBefore = await evaluate(`(() => {
+  const card = document.querySelector(".image-card");
+  if (!card) return null;
+  const rect = card.getBoundingClientRect();
+  return { id: card.dataset.id, x: rect.left + rect.width / 2, y: rect.top + Math.min(50, rect.height / 3), left: card.style.left, top: card.style.top, transform: document.getElementById("world").style.transform };
+})()`);
+if (imageBefore) {
+  await drag(imageBefore.x, imageBefore.y, imageBefore.x + 74, imageBefore.y + 42);
+  await sleep(800);
+}
+const imageAfter = await evaluate(`(() => {
+  const card = document.querySelector(".image-card");
+  return card ? { left: card.style.left, top: card.style.top, transform: document.getElementById("world").style.transform, selected: card.classList.contains("selected") } : null;
+})()`);
 
-/* ③ 白板（W 工具点击放置） */
-await evalv(`setTool('board')`);
-await realClick(spot.x - 200, spot.y + 330);
-await sleep(600);
-const afterBoard = sidecar();
+const ui = await evaluate(`(() => {
+  const toolbox = document.getElementById("toolbox").getBoundingClientRect();
+  const viewport = document.getElementById("viewport").getBoundingClientRect();
+  return {
+    toolboxCentered: Math.abs((toolbox.left + toolbox.width / 2) - (viewport.left + viewport.width / 2)) < 2,
+    toolboxAtBottom: Math.abs(viewport.bottom - toolbox.bottom - 18) < 2,
+    obsoleteToolsGone: !document.querySelector('[data-tool="note"], [data-tool="board"]'),
+    obsoleteNotesHidden: document.querySelectorAll("#notes-layer .note").length === 0,
+  };
+})()`);
+const after = sidecar();
+const storedImage = imageBefore ? after.images.find((item) => item.id === imageBefore.id) : null;
+const imageMoved = Boolean(imageBefore && imageAfter && (imageBefore.left !== imageAfter.left || imageBefore.top !== imageAfter.top));
+const canvasStayed = Boolean(imageBefore && imageAfter && imageBefore.transform === imageAfter.transform);
+const storedMove = Boolean(storedImage && Math.abs(storedImage.x - Number.parseFloat(imageAfter.left)) < 0.5 && Math.abs(storedImage.y - Number.parseFloat(imageAfter.top)) < 0.5);
 
-/* DOM 断言：箭头 SVG / 便签卡 / 白板卡真实渲染 */
-const dom = await evalv(`(() => ({
-  arrowSvg: document.querySelectorAll("#arrows .arrow-g").length,
-  notes: document.querySelectorAll("#notes-layer .note").length,
-  boards: document.querySelectorAll("#notes-layer .note.board").length,
-}))()`);
 console.log("CANVAS-TOOLS:", JSON.stringify({
-  before, afterArrow, afterNote, afterBoard, dom, labelShown,
-  arrowCreated: afterArrow.arrows === before.arrows + 1,
-  noteCreated: afterNote.notes === before.notes + 1,
-  boardCreated: afterBoard.boards === afterNote.boards + 1,
-}, null, 1));
-ws.close(); process.exit(0);
+  arrowCreated: after.arrows.length === before.arrows.length + 1,
+  labelShown,
+  imageMoved,
+  canvasStayed,
+  storedMove,
+  selected: imageAfter?.selected === true,
+  ...ui,
+}, null, 2));
+ws.close();

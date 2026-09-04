@@ -10,7 +10,7 @@ const [command, ...rest] = process.argv.slice(2);
 const help = `CoEditor CLI
 
   open <folder> [--port 4400]      启动本地批注层网页服务
-  constraints <folder> <doc>       输出该文档当前生效的约束批注（给 Agent 用）
+  constraints <folder> <doc>       输出该文档当前使用的约束批注（给 Agent 用）
   constraints --json <folder> <doc> 以 JSON 输出
   conflicts <folder> <doc>         列出尚未裁定的冲突批注
   canvas <folder> <doc>            导出 Obsidian JSON Canvas（<doc>.canvas，含批注卡与连线）
@@ -28,7 +28,21 @@ async function readDoc(folder, doc) {
   const sidecar = join(resolve(folder), ".marginalia", "annotations.json");
   try {
     const data = JSON.parse(await readFile(sidecar, "utf8"));
-    return data.docs[doc] || [];
+    const list = data.docs[doc] || [];
+    const usedByRound = new Map();
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      if (!usedByRound.has(round)) usedByRound.set(round, new Set());
+      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
+      if (match && Number(match[1]) === round) usedByRound.get(round).add(Number(match[2]));
+    }
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      if (typeof item.no === "string" && new RegExp(`^${round}-\\d+$`).test(item.no)) continue;
+      let seq = 1; while (usedByRound.get(round).has(seq)) seq += 1;
+      usedByRound.get(round).add(seq); item.no = `${round}-${seq}`;
+    }
+    return list;
   } catch {
     return [];
   }
@@ -41,15 +55,19 @@ async function constraints(folder, doc, flags) {
     console.log(JSON.stringify({ doc, count: active.length, constraints: active }, null, 2));
     return;
   }
-  console.log(`# ${doc} · 生效批注 ${active.length} 条`);
+  const noOf = (itemOrId) => {
+    const item = typeof itemOrId === "string" ? list.find((entry) => entry.id === itemOrId) : itemOrId;
+    return item ? (item.no || item.id) : itemOrId;
+  };
+  console.log(`# ${doc} · 当前批注 ${active.length} 条`);
   for (const item of active) {
     // 冲突警告只算对方仍生效的：对方已 deprecated 即冲突已解除（与 conflicts 命令口径一致）
     const liveConflicts = (item.conflicts_with || []).filter((id) => {
       const other = list.find((entry) => entry.id === id);
       return other && other.status === "active";
     });
-    const conflict = liveConflicts.length ? `  ⚠ 与 ${liveConflicts.join("/")} 冲突` : "";
-    console.log(`\n[${item.id}] w=${Number(item.weight ?? 1).toFixed(2)}${conflict}`);
+    const conflict = liveConflicts.length ? `  ⚠ 与 ${liveConflicts.map(noOf).join("/")} 冲突` : "";
+    console.log(`\n[${noOf(item)}] w=${Number(item.weight ?? 1).toFixed(2)}${conflict}`);
     console.log(`  位置：「${item.quote.slice(0, 60)}」`);
     console.log(`  要求：${item.body}`);
   }
@@ -68,10 +86,11 @@ async function conflicts(folder, doc) {
       const a = list.find((entry) => entry.id === item.id);
       const b = list.find((entry) => entry.id === other);
       if (!a || !b || a.status !== "active" || b.status !== "active") continue;
-      console.log(`\n⚠ ${a.id} × ${b.id}`);
-      console.log(`  ${a.id}：「${a.quote.slice(0, 50)}」→ ${a.body}`);
-      console.log(`  ${b.id}：「${b.quote.slice(0, 50)}」→ ${b.body}`);
-      console.log(`  （在网页中点「以此为准」裁定；批注永不删除）`);
+      const aNo = a.no || a.id; const bNo = b.no || b.id;
+      console.log(`\n⚠ ${aNo} × ${bNo}`);
+      console.log(`  ${aNo}：「${a.quote.slice(0, 50)}」→ ${a.body}`);
+      console.log(`  ${bNo}：「${b.quote.slice(0, 50)}」→ ${b.body}`);
+      console.log(`  （在网页中点「以此为准」裁定）`);
     }
   }
 }
@@ -102,7 +121,7 @@ async function exportCanvas(folder, doc) {
     nodes.push({
       id: item.id,
       type: "text",
-      text: `**${item.id}** · ${item.status} · w=${Number(item.weight ?? 1).toFixed(2)}\n\n${item.body}\n\n---\n锚点：${anchor}${conflicts}${superseded}`,
+      text: `**${item.no || item.id}** · ${item.status} · w=${Number(item.weight ?? 1).toFixed(2)}\n\n${item.body}\n\n---\n锚点：${anchor}${conflicts}${superseded}`,
       x: 760,
       y,
       width: 360,
@@ -115,7 +134,7 @@ async function exportCanvas(folder, doc) {
       fromSide: "right",
       toNode: item.id,
       toSide: "left",
-      label: `${item.id} ${item.status}`,
+      label: `${item.no || item.id} ${item.status}`,
       color: CANVAS_COLOR[item.status] || "#7d7a75",
     });
     y += 240;
@@ -125,37 +144,24 @@ async function exportCanvas(folder, doc) {
   console.log(`已导出 ${target}（${list.length} 张批注卡）—— 用 Obsidian 打开此 vault 即可查看`);
 }
 
-/* canvas --with-canvas：连同手绘箭头标签与便签一起导出（画布元素按文档归属） */
+/* canvas --with-canvas：连同手绘箭头标签一起导出（画布元素按文档归属）。
+   旧版便签数据仍保留在 sidecar，但产品已停止呈现和导出。 */
 async function exportCanvasFull(folder, doc) {
   const root = resolve(folder);
   await exportCanvas(root, doc);
   const sidecarPath = join(root, ".marginalia", "annotations.json");
-  let canvasEls = { arrows: [], notes: [] };
+  let canvasEls = { arrows: [] };
   try {
     const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
     const owns = (item) => !item.doc || item.doc === doc;
     canvasEls.arrows = (sidecar.arrows || []).filter((a) => owns(a) && (a.label || "").trim());
-    canvasEls.notes = (sidecar.notes || []).filter((n) => owns(n) && (n.text || "").trim());
   } catch {
     return;
   }
-  if (!canvasEls.arrows.length && !canvasEls.notes.length) return;
+  if (!canvasEls.arrows.length) return;
   const target = join(root, `${doc}.canvas`);
   const data = JSON.parse(await readFile(target, "utf8"));
   let y = 0;
-  for (const note of canvasEls.notes) {
-    data.nodes.push({
-      id: note.id,
-      type: "text",
-      text: `**${note.id}** · 便签\n\n${note.text}`,
-      x: 1200,
-      y,
-      width: 280,
-      height: 160,
-      color: "6",
-    });
-    y += 200;
-  }
   for (const arrow of canvasEls.arrows) {
     data.nodes.push({
       id: arrow.id,
@@ -170,7 +176,7 @@ async function exportCanvasFull(folder, doc) {
     y += 160;
   }
   await writeFile(target, JSON.stringify(data, null, 2));
-  console.log(`画布元素：${canvasEls.notes.length} 张便签 + ${canvasEls.arrows.length} 个箭头标签已并入`);
+  console.log(`画布元素：${canvasEls.arrows.length} 个箭头标签已并入`);
 }
 
 if (command === "open") {

@@ -4,6 +4,10 @@ import { readFile, writeFile, mkdir, stat, readdir, rename } from "node:fs/promi
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 let ROOT = resolve(process.argv[2] || process.cwd());
@@ -53,7 +57,7 @@ async function readSidecar() {
    批注与画布元素永不无故消失——写盘瞬间任一集合数量减少，直接拒绝保存。
    读不了当前状态时也拒绝写：宁可失败，绝不拿空/半读数据覆盖事实源 */
 const CANVAS_KEYS = ["arrows", "notes", "images", "drafts"];
-async function writeSidecar(data) {
+async function writeSidecar(data, opts = {}) {
   let current = null;
   let currentRaw = null;
   try {
@@ -67,13 +71,14 @@ async function writeSidecar(data) {
     const countDocs = (d) => Object.values(d.docs || {}).reduce((acc, list) => acc + (Array.isArray(list) ? list.length : 0), 0);
     const beforeDocs = countDocs(current);
     const afterDocs = countDocs(data);
-    if (beforeDocs > afterDocs) {
+    if (beforeDocs > afterDocs + (opts.allowedRemovals || 0)) {
       throw new Error(`blocked-destructive-annotation-loss: ${beforeDocs} -> ${afterDocs}`);
     }
     for (const key of CANVAS_KEYS) {
       const before = Array.isArray(current[key]) ? current[key].length : 0;
       const after = Array.isArray(data[key]) ? data[key].length : 0;
-      if (before > after) {
+      const allowed = Number(opts.allowedCanvasRemovals?.[key] || 0);
+      if (before > after + allowed) {
         throw new Error(`blocked-destructive-canvas-loss: ${key} ${before} -> ${after}`);
       }
     }
@@ -90,6 +95,43 @@ async function writeSidecar(data) {
   const tmp = `${SIDECAR}.${process.pid}.tmp`;
   await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
   await rename(tmp, SIDECAR);
+}
+
+/* 批注显示号：no = "批次-序号"（0-1、0-2……第 0 批次第 1 条），用户可读、Agent 引用同号。
+   读时懒迁移：存量无 no 的批注按 round 分组、组内存储顺序编号，写回固化（删除不影响已有编号）。 */
+function ensureAnnotationNos(data) {
+  let changed = false;
+  for (const list of Object.values(data.docs || {})) {
+    const usedByRound = new Map();
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      if (!usedByRound.has(round)) usedByRound.set(round, new Set());
+      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
+      if (match && Number(match[1]) === round && Number(match[2]) > 0) usedByRound.get(round).add(Number(match[2]));
+    }
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
+      if (!match || Number(match[1]) !== round || Number(match[2]) <= 0) {
+        const used = usedByRound.get(round);
+        let seq = 1;
+        while (used.has(seq)) seq += 1;
+        used.add(seq);
+        item.no = `${round}-${seq}`;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+function allocateNo(list, round) {
+  ensureAnnotationNos({ docs: { current: list } });
+  const max = list.reduce((value, item) => {
+    const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
+    return match && Number(match[1]) === round ? Math.max(value, Number(match[2])) : value;
+  }, 0);
+  return `${round}-${max + 1}`;
 }
 
 function nextSeq(list, prefix) {
@@ -263,6 +305,24 @@ const server = http.createServer(async (req, res) => {
       return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
     }
 
+    /* macOS 原生目录选择器：由用户点击触发，取消时不改变当前 vault。 */
+    if (url.pathname === "/api/folder-picker" && req.method === "POST") {
+      if (process.platform !== "darwin" || process.env.COEDITOR_DISABLE_NATIVE_PICKER === "1") {
+        return send(501, JSON.stringify({ error: "native-picker-unavailable" }));
+      }
+      try {
+        const script = 'POSIX path of (choose folder with prompt "选择 CoEditor 要打开的文件夹")';
+        const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script], { timeout: 10 * 60 * 1000 });
+        const selected = resolve(stdout.trim());
+        const info = await stat(selected).catch(() => null);
+        if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
+        return send(200, JSON.stringify({ ok: true, path: selected }));
+      } catch (err) {
+        const cancelled = /User canceled|(-128)/i.test(String(err && (err.stderr || err.message) || err));
+        return send(cancelled ? 409 : 500, JSON.stringify({ error: cancelled ? "cancelled" : "native-picker-failed" }));
+      }
+    }
+
     /* ---------- 文件夹选择器：可视化目录浏览数据源（只列子目录，不读文件内容） ---------- */
     if (url.pathname.startsWith("/api/fs") && req.method === "GET") {
       const raw = String(url.searchParams.get("dir") || "").trim();
@@ -380,8 +440,10 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "DELETE") {
           const id = url.searchParams.get("id");
+          const before = data.arrows.length;
           data.arrows = data.arrows.filter((item) => item.id !== id);
-          await writeSidecar(data);
+          if (data.arrows.length === before) return send(404, JSON.stringify({ error: "not found" }));
+          await writeSidecar(data, { allowedCanvasRemovals: { arrows: 1 } });
           return send(200, JSON.stringify({ ok: true }));
         }
       }
@@ -413,8 +475,10 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "DELETE") {
           const id = url.searchParams.get("id");
+          const before = data.notes.length;
           data.notes = data.notes.filter((item) => item.id !== id);
-          await writeSidecar(data);
+          if (data.notes.length === before) return send(404, JSON.stringify({ error: "not found" }));
+          await writeSidecar(data, { allowedCanvasRemovals: { notes: 1 } });
           return send(200, JSON.stringify({ ok: true }));
         }
       }
@@ -448,8 +512,10 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "DELETE") {
           const id = url.searchParams.get("id");
+          const before = data.images.length;
           data.images = data.images.filter((item) => item.id !== id);
-          await writeSidecar(data);
+          if (data.images.length === before) return send(404, JSON.stringify({ error: "not found" }));
+          await writeSidecar(data, { allowedCanvasRemovals: { images: 1 } });
           return send(200, JSON.stringify({ ok: true }));
         }
       }
@@ -487,8 +553,10 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "DELETE") {
           const id = url.searchParams.get("id");
+          const before = data.drafts.length;
           data.drafts = data.drafts.filter((item) => item.id !== id);
-          await writeSidecar(data);
+          if (data.drafts.length === before) return send(404, JSON.stringify({ error: "not found" }));
+          await writeSidecar(data, { allowedCanvasRemovals: { drafts: 1 } });
           return send(200, JSON.stringify({ ok: true }));
         }
       }
@@ -522,6 +590,7 @@ const server = http.createServer(async (req, res) => {
       const list = data.docs[key] || (data.docs[key] = []);
 
       if (req.method === "GET") {
+        if (ensureAnnotationNos(data)) await writeSidecar(data); // 懒迁移存量编号
         return send(200, JSON.stringify({ path: key, annotations: list }));
       }
 
@@ -540,6 +609,7 @@ const server = http.createServer(async (req, res) => {
         }
         const item = {
           id: nextSeq(list, "A"),
+          no: allocateNo(list, Number.isFinite(data.activeRound) ? data.activeRound : 0),
           kind,
           round: Number.isFinite(data.activeRound) ? data.activeRound : 0,
           quote: body.quote || "",
@@ -579,6 +649,15 @@ const server = http.createServer(async (req, res) => {
         item.history.push({ event: body.event || "updated", at: new Date().toISOString() });
         await writeSidecar(data);
         return send(200, JSON.stringify({ ok: true, annotation: item }));
+      }
+
+      if (req.method === "DELETE") {
+        // 用户显式删除：真删（守卫放行 1 条——删除是人的主权，防破坏守卫只挡"无故消失"）
+        const idx = list.findIndex((entry) => entry.id === body.id);
+        if (idx < 0) return send(404, JSON.stringify({ error: "not found" }));
+        const removed = list.splice(idx, 1)[0];
+        await writeSidecar(data, { allowedRemovals: 1 });
+        return send(200, JSON.stringify({ ok: true, removed }));
       }
     }
 

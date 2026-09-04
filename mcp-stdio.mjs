@@ -31,7 +31,21 @@ async function listTree(dir = ROOT, base = ROOT) {
 async function loadAnnotations(doc) {
   try {
     const data = JSON.parse(await readFile(SIDECAR, "utf8"));
-    return data.docs[doc] || [];
+    const list = data.docs[doc] || [];
+    const used = new Map();
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      if (!used.has(round)) used.set(round, new Set());
+      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
+      if (match && Number(match[1]) === round) used.get(round).add(Number(match[2]));
+    }
+    for (const item of list) {
+      const round = Number.isFinite(item.round) ? item.round : 0;
+      if (typeof item.no === "string" && new RegExp(`^${round}-\\d+$`).test(item.no)) continue;
+      let seq = 1; while (used.get(round).has(seq)) seq += 1;
+      used.get(round).add(seq); item.no = `${round}-${seq}`;
+    }
+    return list;
   } catch {
     return [];
   }
@@ -64,7 +78,7 @@ const TOOLS = [
   {
     name: "get_active_constraints",
     description:
-      "【修改文档前必调】获取指定文档当前生效的人类批注约束，按权重降序。任何对该文档的修改都必须先遵守这些约束；无法满足时应向用户说明而不是绕过。",
+      "【修改文档前必调】获取指定文档当前使用的人类批注约束，按权重降序。任何对该文档的修改都必须先遵守这些约束；无法满足时应向用户说明而不是绕过。",
     inputSchema: {
       type: "object",
       properties: { doc: { type: "string", description: "文档相对路径" } },
@@ -78,7 +92,7 @@ const TOOLS = [
       type: "object",
       properties: {
         doc: { type: "string" },
-        id: { type: "string", description: "批注编号，如 A-0003" },
+        id: { type: "string", description: "批注内部 ID 或显示编号，如 A-0003、0-3" },
       },
       required: ["doc", "id"],
     },
@@ -106,7 +120,7 @@ const TOOLS = [
   {
     name: "get_canvas_state",
     description:
-      "读取画布全貌：手绘箭头、便签、图卡、HTML 草稿卡（含坐标与归属文档）。修改前了解人在画布上的视觉语境时调用。",
+      "读取画布全貌：手绘箭头、图卡、HTML 草稿卡（含坐标与归属文档）。修改前了解人在画布上的视觉语境时调用。",
     inputSchema: {
       type: "object",
       properties: { doc: { type: "string", description: "可选：只看归属某文档的元素" } },
@@ -115,7 +129,7 @@ const TOOLS = [
   {
     name: "get_ui_state",
     description:
-      "读取用户当前打开的文档与选中的元素（批注/箭头/便签/图卡）。用户说'这个''我选中的'时用它确定指代。",
+      "读取用户当前打开的文档与选中的元素（批注/箭头/图卡）。用户说'这个''我选中的'时用它确定指代。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -158,6 +172,7 @@ const TOOLS = [
 function brief(item) {
   return {
     id: item.id,
+    no: item.no || null,
     status: item.status,
     weight: item.weight,
     kind: item.kind || "text",
@@ -258,25 +273,23 @@ async function callTool(name, args = {}) {
           });
         }
       }
-      // 手绘箭头标签与便签：人在画布上写的意图，同属约束
-      let canvas = { arrows: [], notes: [] };
+      // 画布只保留箭头；便签/白板已从产品交互中移除。
+      let canvas = { arrows: [] };
       try {
         const sidecar = JSON.parse(await readFile(SIDECAR, "utf8"));
         const owns = (item) => !item.doc || item.doc === args.doc;
         canvas.arrows = (sidecar.arrows || []).filter((a) => owns(a) && (a.label || "").trim());
-        canvas.notes = (sidecar.notes || []).filter((n) => owns(n) && (n.text || "").trim());
       } catch { /* sidecar 不可读时跳过画布约束 */ }
       return {
         doc: args.doc,
-        count: list.length + canvas.arrows.length + canvas.notes.length,
-        rule: "以下为人类留下的持久约束，修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束。手绘箭头与便签同属人类意图。",
+        count: list.length + canvas.arrows.length,
+        rule: "以下为人类留下的当前约束，修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。",
         constraints: list.map((item) => {
           const briefItem = brief(item);
           briefItem.conflicts_with = item.live_conflicts || [];
           return briefItem;
         }),
         canvas_arrows: canvas.arrows.map((a) => ({ id: a.id, instruction: a.label.trim() })),
-        canvas_notes: canvas.notes.map((n) => ({ id: n.id, instruction: n.text.trim() })),
       };
     }
     case "list_annotation_exports": {
@@ -295,7 +308,7 @@ async function callTool(name, args = {}) {
       }
     }
     case "get_annotation_context": {
-      const item = (await loadAnnotations(args.doc)).find((entry) => entry.id === args.id);
+      const item = (await loadAnnotations(args.doc)).find((entry) => entry.id === args.id || entry.no === args.id);
       if (!item) throw new Error(`annotation ${args.id} not found`);
       return item;
     }

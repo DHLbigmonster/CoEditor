@@ -1018,3 +1018,79 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
 }
 .CodeMirror-dialog input { border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: #fff; color: var(--ink); }
 .CodeMirror-dialog button { color: var(--ink); }
+
+/* ================= v0.9.0 · 保留语义 / 重影修复 / 批注可编辑可删除 / 抽屉视觉状态 ================= */
+/* 重影根因：<mark> 的 UA 默认样式是黑色文字——PDF 文本层里 mark 会把透明文字变黑，
+   与 canvas 原文字叠加成重影。强制文本层内所有锚点文字保持透明。 */
+#doc .pdf-text .anchor,
+#doc .pdf-text .anchor * {
+  color: transparent !important;
+  text-shadow: none !important;
+}
+
+/* 卡片内联编辑 */
+.card-edit {
+  width: 100%; background: #f3efe7; color: var(--ink);
+  border: 1px solid transparent; border-radius: var(--radius-s);
+  padding: 9px 11px; font: inherit; font-size: 12.5px; line-height: 1.6; resize: vertical;
+}
+.card-edit:focus { outline: none; box-shadow: 0 0 0 2px rgba(238, 107, 80, .35); }
+.c-actions button.danger { color: #b44131; }
+.c-actions button.danger:hover { background: rgba(238, 107, 80, .14); color: #993526; }
+.c-actions button.primary { background: var(--active); color: #fff; font-weight: 500; }
+.c-actions button.ghost { background: rgba(69, 57, 42, .07); color: var(--ink-dim); }
+
+/* 抽屉视觉状态：生效 = 呼吸绿点（替代文字标签）；历史组淡化 */
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #6f9f61; display: inline-block;
+  animation: live-pulse 2.4s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(111, 159, 97, .45); }
+  50% { box-shadow: 0 0 0 5px rgba(111, 159, 97, 0); }
+}
+.d-item[data-status="stale"] .d-item-body,
+.d-item[data-status="deprecated"] .d-item-body { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: rgba(125, 122, 117, .45); }
+.d-item[data-status="stale"], .d-item[data-status="deprecated"] { opacity: .62; }
+.d-round { letter-spacing: .04em; }
+.d-item { transition: opacity .25s; }
+
+/* VS Code 式可折叠文件树：整行可点、箭头随展开旋转、层级缩进一致。 */
+.tree-node > .tree-children { display: none; }
+.tree-node.expanded > .tree-children { display: block; }
+.tree .tree-row {
+  width: calc(100% - 10px); height: 28px; margin: 0 5px; padding: 0 8px 0 calc(8px + var(--depth, 0) * 14px);
+  border: 0; border-radius: 6px; background: transparent; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 6px; text-align: left; cursor: default;
+  font: 12.5px/1.2 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+.tree .tree-row:hover { background: rgba(72, 60, 43, .065); color: var(--ink); }
+.tree .tree-row.file.current { background: #e8e2d6; color: var(--ink); box-shadow: inset 2px 0 0 var(--active); }
+.tree .tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree .twistie { width: 13px; flex: 0 0 13px; color: var(--ink-faint); font-size: 18px; line-height: 1; transform: rotate(0deg); transition: transform .13s ease; }
+.tree-node.expanded > .dir .twistie { transform: rotate(90deg); }
+.tree .folder-icon { width: 14px; height: 10px; flex: 0 0 14px; border: 1.3px solid currentColor; border-radius: 2px; opacity: .62; position: relative; }
+.tree .folder-icon::before { content: ""; position: absolute; left: 1px; top: -4px; width: 6px; height: 3px; border: 1.3px solid currentColor; border-bottom: 0; border-radius: 2px 2px 0 0; }
+.tree .file i { flex: 0 0 5px; margin: 0 3px 0 20px; }
+
+/* 精简图片画布：工具条始终固定在可见区域底部中央；旧便签数据不再渲染。 */
+#toolbox { left: 50%; right: auto; bottom: 18px; transform: translateX(-50%); position: absolute; }
+#notes-layer { display: none !important; }
+.image-card { touch-action: none; }
+.image-card img { user-select: none; -webkit-user-drag: none; }
+
+.d-actions { display: flex; gap: 6px; margin-top: 10px; opacity: 0; transition: opacity .15s; }
+.d-item:hover .d-actions, .d-item:focus-within .d-actions { opacity: 1; }
+.d-actions button {
+  border: 0; border-radius: 7px; padding: 5px 9px; background: rgba(69, 57, 42, .07);
+  color: var(--ink-dim); font-size: 11px; cursor: pointer;
+}
+.d-actions button:hover { background: rgba(69, 57, 42, .13); color: var(--ink); }
+.d-actions button.danger { color: #ad4434; }
+.drawer-edit {
+  width: 100%; min-height: 72px; margin: 4px 0 8px; padding: 9px 10px; resize: vertical;
+  border: 1px solid transparent; border-radius: 9px; outline: 0; background: #f3efe7; color: var(--ink);
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+.drawer-edit:focus { box-shadow: 0 0 0 2px rgba(238, 107, 80, .28); }

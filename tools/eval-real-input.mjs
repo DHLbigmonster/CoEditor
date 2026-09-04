@@ -1,5 +1,5 @@
 // 真实输入 E2E：CDP Input.dispatchMouseEvent 派发受信任鼠标事件（与用户真实拖拽同通道）
-// 验证：① md 拖选不触发画布平移 + 浮条弹出 ② 高亮落锚 ③ PDF 拖选弹浮条 + 高亮进文本层
+// 验证：① md 拖选不触发画布平移 + 浮条弹出 ② 保留落锚且无牵引线 ③ PDF 保留无文字重影
 //       ④ 双击进编辑模式 ⑤ 文件夹选择器弹窗
 // 前置：已 POST /api/vault 切到一次性副本 vault（测试数据不污染 sample）
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
@@ -49,7 +49,7 @@ async function realClick(x, y, clickCount = 1) {
 
 const result = {};
 
-/* ---------- ①② markdown：真实拖选 → 不平移 + 浮条 + 高亮落锚 ---------- */
+/* ---------- ①② markdown：真实拖选 → 不平移 + 浮条 + 保留落锚 ---------- */
 const nav1 = await send("Page.navigate", { url: `${BASE}/?doc=${encodeURIComponent("研究设计笔记.md")}` });
 if (nav1.errorText) throw new Error("navigate failed: " + nav1.errorText);
 await sleep(2200);
@@ -72,16 +72,23 @@ if (result.md && !result.md.error) {
     cursor: getComputedStyle(document.getElementById("doc")).cursor,
   }))()`);
   result.md.noPan = before === result.mdAfter.transform;
-  // 点浮条「高亮」
+  // 点浮条「保留」
   await evaluate(`document.querySelector('#sel-menu [data-sel-act="highlight"]').click()`);
   await sleep(900);
-  result.mdHighlight = await evaluate(`(() => ({
-    markInDoc: !!document.querySelector('#doc mark.anchor[data-kind="highlight"]'),
-    cards: document.querySelectorAll("#cards .card").length,
-  }))()`);
+  result.mdHighlight = await evaluate(`(() => {
+    const mark = document.querySelector('#doc mark.anchor[data-kind="highlight"]');
+    const card = mark && document.querySelector('#cards .card[data-id="' + mark.dataset.ann + '"]');
+    return {
+      markInDoc: !!mark,
+      noConnector: !!mark && !document.querySelector('#lines path[data-ann="' + mark.dataset.ann + '"]'),
+      visibleNoPattern: !!card && /^\\d+-\\d+$/.test(card.querySelector('.c-id')?.textContent || ''),
+      retainLabel: card?.querySelector('.c-kind')?.textContent === '保留',
+      cards: document.querySelectorAll("#cards .card").length,
+    };
+  })()`);
 }
 
-/* ---------- ③ PDF：真实拖选 → 浮条 + 高亮进文本层 ---------- */
+/* ---------- ③ PDF：真实拖选 → 浮条 + 保留进文本层，文字透明避免覆盖 PDF canvas 重影 ---------- */
 await send("Page.navigate", { url: `${BASE}/?doc=${encodeURIComponent("研究设计-技术附录.pdf")}` });
 await sleep(1200);
 for (let i = 0; i < 20; i += 1) {
@@ -107,6 +114,7 @@ if (result.pdfTarget && !result.pdfTarget.error) {
   result.pdfHighlight = await evaluate(`(() => ({
     markInTextLayer: !!document.querySelector('#doc .pdf-text mark.anchor[data-kind="highlight"]'),
     highlightColor: (() => { const m = document.querySelector('#doc .pdf-text mark.anchor[data-kind="highlight"]'); return m ? getComputedStyle(m).background.slice(0, 60) : null; })(),
+    textLayerTransparent: (() => { const m = document.querySelector('#doc .pdf-text mark.anchor[data-kind="highlight"]'); return m ? getComputedStyle(m).color === 'rgba(0, 0, 0, 0)' : false; })(),
   }))()`);
 }
 

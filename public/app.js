@@ -147,6 +147,10 @@ function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeAttr(text) {
+  return escapeHtml(String(text)).replace(/"/g, "&quot;");
+}
+
 function inline(text) {
   return escapeHtml(text)
     .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -337,7 +341,14 @@ async function anchorAll() {
 }
 
 /* ---------------- 卡片 ---------------- */
-const LABELS = { active: "生效", addressed: "已处理", stale: "过期", deprecated: "废弃" };
+const LABELS = { active: "本轮", addressed: "已处理", stale: "已过期", deprecated: "已移除" };
+
+function displayNo(itemOrId) {
+  const item = typeof itemOrId === "string"
+    ? state.annotations.find((entry) => entry.id === itemOrId)
+    : itemOrId;
+  return item ? (item.no || item.id) : String(itemOrId || "");
+}
 
 function weightDots(weight) {
   const filled = Math.round(Number(weight ?? 1) * 5);
@@ -355,29 +366,27 @@ function cardElement(annotation) {
     const other = state.annotations.find((entry) => entry.id === otherId);
     return other && other.status === "active";
   });
-  const KIND_BADGE = { highlight: '<span class="c-kind hl">高亮</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
+  const KIND_BADGE = { highlight: '<span class="c-kind hl">保留</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
   const roundNo = Number.isFinite(annotation.round) ? annotation.round : 0;
   const isCurrentRound = roundNo === (state.round ?? 0);
   card.dataset.roundCur = isCurrentRound ? "1" : "0";
+  const visibleNo = displayNo(annotation);
+  const actions = annotation.kind === "highlight"
+    ? '<button data-act="delete" class="danger">取消保留</button>'
+    : `${annotation.status === "active" ? '<button data-act="edit">编辑</button><button data-act="addressed">已处理</button><button data-act="deprecated">移到历史</button>' : '<button data-act="revive">恢复</button>'}<button data-act="delete" class="danger">删除</button>${conflicting.length ? '<button data-act="supersede">以此为准</button>' : ""}`;
   card.innerHTML = `
     <div class="c-head">
-      <span class="c-id">${annotation.id}</span>
-      <span class="c-round${isCurrentRound ? " cur" : ""}" title="批次：同一轮迭代里写的批注">R${roundNo}</span>
+      <span class="c-id">${visibleNo}</span>
       ${KIND_BADGE[annotation.kind] || ""}
       ${annotation.status !== "active" ? `<span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>` : ""}
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
-      ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.join("/")}</span>` : ""}
+      ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.map(displayNo).join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.map(displayNo).join("/")}</span>` : ""}
       ${Number(annotation.weight ?? 1) < 1 ? `<span class="c-weight" title="权重 ${Number(annotation.weight ?? 1).toFixed(2)}">${weightDots(annotation.weight)}</span>` : ""}
     </div>
-    <div class="c-body">${escapeHtml(annotation.body || (annotation.kind === "highlight" ? "（高亮标记 · 提醒 Agent 此处重要）" : annotation.kind === "strike" ? "（删除线标记 · 建议删除此段）" : ""))}</div>
+    <div class="c-body">${escapeHtml(annotation.body || (annotation.kind === "highlight" ? "（标记保留 · 这段内容要保留）" : annotation.kind === "strike" ? "（删除线标记 · 建议删除此段）" : ""))}</div>
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
-    <div class="c-actions">
-      <button data-act="addressed">已处理</button>
-      <button data-act="deprecated">废弃</button>
-      <button data-act="revive">恢复生效</button>
-      ${conflicting.length ? '<button data-act="supersede">以此为准</button>' : ""}
-    </div>`;
+    <div class="c-actions">${actions}</div>`;
 
   card.addEventListener("mouseenter", () => { state.hovered = annotation.id; drawLines(); });
   card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); });
@@ -436,7 +445,30 @@ function cardElement(annotation) {
           });
         }
         await loadAnnotations();
-        toast(`${annotation.id} 已替代 ${losers.join("、")}（被替代者保留为废弃状态）`);
+        toast(`${displayNo(annotation)} 已替代 ${losers.map(displayNo).join("、")}（旧批注保留在历史中）`);
+        return;
+      }
+      if (act === "edit") { startCardEdit(card, annotation); return; }
+      if (act === "save-edit") {
+        const ta = card.querySelector(".card-edit");
+        await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: annotation.id, body: ta.value, event: "edited" }),
+        });
+        await loadAnnotations();
+        toast("批注已更新");
+        return;
+      }
+      if (act === "cancel-edit") { await loadAnnotations(); return; }
+      if (act === "delete") {
+        await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: annotation.id }),
+        });
+        await loadAnnotations();
+        toast(annotation.kind === "highlight" ? "已取消保留" : "批注已删除");
         return;
       }
       const next = act === "addressed" ? { status: "addressed", weight: 0.5 }
@@ -465,6 +497,36 @@ function renderCards() {
   $("stat-active").textContent = active;
 }
 
+/* 卡片内联编辑批注文字 */
+function startCardEdit(card, annotation) {
+  if (card.querySelector(".card-edit")) return;
+  const body = card.querySelector(".c-body");
+  if (!body) return;
+  const ta = document.createElement("textarea");
+  ta.className = "card-edit";
+  ta.value = annotation.body || "";
+  ta.rows = Math.min(6, Math.max(2, ta.value.split("\n").length + 1));
+  body.replaceWith(ta);
+  ta.focus();
+  const actions = card.querySelector(".c-actions");
+  if (actions) {
+    actions.innerHTML = '<button class="primary">保存 ⌘S</button><button class="ghost">取消</button>';
+    const [save, cancel] = actions.querySelectorAll("button");
+    save.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await patch(annotation.id, { body: ta.value.trim(), event: "edited" });
+      await loadAnnotations();
+      toast("批注已更新");
+    });
+    cancel.addEventListener("click", async (event) => { event.stopPropagation(); await loadAnnotations(); });
+    ta.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if ((event.metaKey || event.ctrlKey) && event.key === "s") { event.preventDefault(); save.click(); }
+      if (event.key === "Escape") { event.preventDefault(); cancel.click(); }
+    });
+  }
+}
+
 /* ---------------- 牵引线 ---------------- */
 function drawLines() {
   const svg = $("lines");
@@ -473,6 +535,7 @@ function drawLines() {
   svg.innerHTML = "";
   const pageRect = worldRect($("page"));
   for (const annotation of state.annotations) {
+    if (annotation.kind === "highlight") continue; // 保留标记：不牵引线（正文黄底即表达）
     const mark = findAnchor(annotation.id)
       || $("doc").querySelector(`.region[data-ann="${annotation.id}"]`);
     const card = $("cards").querySelector(`.card[data-id="${annotation.id}"]`);
@@ -538,16 +601,22 @@ function renderRegions() {
     box.style.top = `${annotation.region.y * 100}%`;
     box.style.width = `${annotation.region.w * 100}%`;
     box.style.height = `${annotation.region.h * 100}%`;
-    box.innerHTML = `<span>${annotation.id}</span>`;
+    box.innerHTML = `<span>${displayNo(annotation)}</span>`;
     layer.appendChild(box);
   }
 }
 
+let activeImageRegionPointer = null;
 function bindRegionStage(stage, imagePath) {
-  stage.addEventListener("mousedown", (event) => {
+  if (stage.dataset.regionBound === "1") return;
+  stage.dataset.regionBound = "1";
+  stage.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
+    if (activeImageRegionPointer !== null || !$("composer").hidden) return;
     event.preventDefault();
     event.stopPropagation();
+    activeImageRegionPointer = event.pointerId;
+    stage.setPointerCapture(event.pointerId);
     const bounds = stage.getBoundingClientRect();
     const startX = event.clientX;
     const startY = event.clientY;
@@ -555,23 +624,32 @@ function bindRegionStage(stage, imagePath) {
     draft.className = "region-draft";
     stage.appendChild(draft);
     const move = (moveEvent) => {
-      const x1 = Math.min(startX, moveEvent.clientX) - bounds.left;
-      const y1 = Math.min(startY, moveEvent.clientY) - bounds.top;
-      const x2 = Math.max(startX, moveEvent.clientX) - bounds.left;
-      const y2 = Math.max(startY, moveEvent.clientY) - bounds.top;
+      if (moveEvent.pointerId !== event.pointerId) return;
+      const cx = Math.max(bounds.left, Math.min(bounds.right, moveEvent.clientX));
+      const cy = Math.max(bounds.top, Math.min(bounds.bottom, moveEvent.clientY));
+      const x1 = Math.min(startX, cx) - bounds.left;
+      const y1 = Math.min(startY, cy) - bounds.top;
+      const x2 = Math.max(startX, cx) - bounds.left;
+      const y2 = Math.max(startY, cy) - bounds.top;
       draft.style.left = `${x1}px`;
       draft.style.top = `${y1}px`;
       draft.style.width = `${x2 - x1}px`;
       draft.style.height = `${y2 - y1}px`;
     };
     const up = (upEvent) => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      if (upEvent.pointerId !== event.pointerId) return;
+      stage.removeEventListener("pointermove", move);
+      stage.removeEventListener("pointerup", up);
+      stage.removeEventListener("pointercancel", cancel);
+      if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+      activeImageRegionPointer = null;
       draft.remove();
-      const x = Math.min(startX, upEvent.clientX) - bounds.left;
-      const y = Math.min(startY, upEvent.clientY) - bounds.top;
-      const w = Math.abs(upEvent.clientX - startX);
-      const h = Math.abs(upEvent.clientY - startY);
+      const endX = Math.max(bounds.left, Math.min(bounds.right, upEvent.clientX));
+      const endY = Math.max(bounds.top, Math.min(bounds.bottom, upEvent.clientY));
+      const x = Math.min(startX, endX) - bounds.left;
+      const y = Math.min(startY, endY) - bounds.top;
+      const w = Math.abs(endX - startX);
+      const h = Math.abs(endY - startY);
       if (w < 12 || h < 12) return;
       const label = imagePath ? `图片 ${imagePath.split("/").pop()} 区域` : "区域";
       pending = {
@@ -595,16 +673,34 @@ function bindRegionStage(stage, imagePath) {
       $("composer-quote").textContent = `框选区域 ${Math.round(w)}×${Math.round(h)} px`;
       $("composer-input").focus();
     };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    const cancel = (cancelEvent) => {
+      if (cancelEvent.pointerId !== event.pointerId) return;
+      stage.removeEventListener("pointermove", move);
+      stage.removeEventListener("pointerup", up);
+      stage.removeEventListener("pointercancel", cancel);
+      activeImageRegionPointer = null;
+      draft.remove();
+    };
+    stage.addEventListener("pointermove", move);
+    stage.addEventListener("pointerup", up);
+    stage.addEventListener("pointercancel", cancel);
   });
 }
 
 function bindImageSelection() {
   const stage = $("image-stage");
-  if (stage) bindRegionStage(stage, null);
+  const bindLoadedGeometry = (target) => {
+    const image = target.querySelector("img");
+    if (!image || image.dataset.geometryBound === "1") return;
+    image.dataset.geometryBound = "1";
+    const redraw = () => { renderRegions(); drawLines(); };
+    image.addEventListener("load", redraw);
+    if (image.complete) requestAnimationFrame(redraw);
+  };
+  if (stage) { bindRegionStage(stage, null); bindLoadedGeometry(stage); }
   for (const inline of $("doc").querySelectorAll(".ii-stage")) {
     bindRegionStage(inline, inline.closest("figure.inline-image").dataset.image);
+    bindLoadedGeometry(inline);
   }
 }
 
@@ -629,12 +725,13 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
     context.strokeRect(x, y, w, h);
     const font = Math.round(scaleUnit * 0.024);
     context.font = `600 ${font}px -apple-system, Helvetica, sans-serif`;
-    const textWidth = context.measureText(annotation.id).width;
+    const visibleNo = displayNo(annotation);
+    const textWidth = context.measureText(visibleNo).width;
     const pad = font * 0.4;
     context.fillStyle = color;
     context.fillRect(x, y - font - pad * 2, textWidth + pad * 2, font + pad * 2);
     context.fillStyle = "#fff";
-    context.fillText(annotation.id, x + pad, y - pad * 1.4);
+    context.fillText(visibleNo, x + pad, y - pad * 1.4);
   }
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
@@ -651,8 +748,8 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
     `源图：${state.path}`,
     `标注截图：${saved.rel}`,
     "",
-    "生效标注：",
-    ...listed.map((item) => `- [${item.id}] ${item.body}（区域 x=${item.region.x.toFixed(2)} y=${item.region.y.toFixed(2)} w=${item.region.w.toFixed(2)} h=${item.region.h.toFixed(2)}）`),
+    "当前标注：",
+    ...listed.map((item) => `- [${displayNo(item)}] ${item.body}（区域 x=${item.region.x.toFixed(2)} y=${item.region.y.toFixed(2)} w=${item.region.w.toFixed(2)} h=${item.region.h.toFixed(2)}）`),
     "",
     "要求：以原图为基础，按上述标注生成一张去掉标注痕迹的新图，放在原图旁边；不要覆盖原图，也不要修改或删除任何已有标注。",
   ];
@@ -685,47 +782,41 @@ async function askEditWithAnnotations() {
   const active = state.annotations
     .filter((item) => item.status === "active")
     .sort((a, b) => b.weight - a.weight);
-  // 手绘箭头标签与便签是人在画布上写的活约束，一并纳入修改指令
+  // 画布只保留箭头与图片；便签/白板已从产品交互中移除。
   const canvasArrows = state.arrows.filter((item) => ownsCanvas(item) && (item.label || "").trim());
-  const canvasNotes = state.notes.filter((item) => ownsCanvas(item) && (item.text || "").trim());
   const lines = [
     `[@CoEditor] 按标注修改 ${state.path}`,
     "",
     "请根据这份文档的人类批注修改它：",
     `- 目标文件：${state.path}`,
-    `- 生效批注 ${active.length} 条，每条都是必须尊重的约束；标记冲突的条目未经裁定前先询问用户`,
+    `- 当前批注 ${active.length} 条，每条都是必须尊重的约束；标记冲突的条目未经裁定前先询问用户`,
     ...(screenshotRel ? [`- 图片标注截图：${screenshotRel}（区域框与编号已烧录进图，作为权威视觉参考）`] : []),
     state.mode === "image"
       ? "- 产出新版本图片放在原图旁边，不要覆盖原图"
       : "- 直接在文件上修改；文本批注对应的原文位置可用 quote 上下文定位",
-    "- 完成后逐条核对：在回复里列出 A-#### → 处理结果",
+    "- 完成后逐条核对：在回复里按 轮次-序号（如 0-1）列出处理结果",
     "- 不要修改或删除 .marginalia/ 下的任何批注记录",
     "",
-    "生效批注：",
+    "当前批注：",
     ...active.map((item) => {
       const where = item.region
         ? `${item.region.page ? `第 ${item.region.page} 页 ` : ""}区域 x=${item.region.x.toFixed(2)} y=${item.region.y.toFixed(2)} w=${item.region.w.toFixed(2)} h=${item.region.h.toFixed(2)}${item.image ? ` · 图 ${item.image}` : ""}`
         : `「${(item.quote || "").slice(0, 60)}」`;
-      const conflict = (item.conflicts_with || []).length ? ` ⚠与${item.conflicts_with.join("/")}冲突` : "";
-      return `- [${item.id}] w=${Number(item.weight ?? 1).toFixed(2)} ${where} → ${item.body}${conflict}`;
+      const conflict = (item.conflicts_with || []).length ? ` ⚠与${item.conflicts_with.map(displayNo).join("/")}冲突` : "";
+      return `- [${displayNo(item)}] w=${Number(item.weight ?? 1).toFixed(2)} ${where} → ${item.body}${conflict}`;
     }),
     ...(canvasArrows.length ? [
       "",
       "画布手绘箭头（人的视觉指令）：",
       ...canvasArrows.map((item) => `- [${item.id}]「${item.label.trim()}」`),
     ] : []),
-    ...(canvasNotes.length ? [
-      "",
-      "画布便签：",
-      ...canvasNotes.map((item) => `- [${item.id}] ${item.text.trim()}`),
-    ] : []),
   ];
-  const total = active.length + canvasArrows.length + canvasNotes.length;
+  const total = active.length + canvasArrows.length;
   const prompt = lines.join("\n");
   $("drawer-body").innerHTML = `
     <div class="d-item">
       <div class="d-item-head"><span class="c-id">修改指令已组装</span></div>
-      <div class="d-item-body">${total} 条约束（批注 ${active.length} · 箭头 ${canvasArrows.length} · 便签 ${canvasNotes.length}）${screenshotRel ? " · 标注图已导出" : ""}。复制后发给任何 Agent 即可执行。</div>
+      <div class="d-item-body">${total} 条约束（批注 ${active.length} · 箭头 ${canvasArrows.length}）${screenshotRel ? " · 标注图已导出" : ""}。复制后发给任何 Agent 即可执行。</div>
     </div>
     <textarea id="export-prompt" class="d-export">${escapeHtml(prompt)}</textarea>
     <button id="export-copy" class="chip">复制修改指令</button>`;
@@ -1017,10 +1108,7 @@ function openArrowLabelEditor(arrow) {
 function renderNotes() {
   const host = $("notes-layer");
   host.innerHTML = "";
-  for (const note of state.notes) {
-    if (!ownsCanvas(note)) continue;
-    host.appendChild(noteElement(note));
-  }
+  // 历史数据保留在 sidecar 以兼容旧版本，但 v0.9 起不再呈现便签/白板。
 }
 
 function noteElement(note) {
@@ -1123,30 +1211,38 @@ async function placeNote(event) {
 }
 
 /* ---------------- 画布图卡与 HTML 草稿卡 ---------------- */
-function cardDrag(node, item, patchFields) {
+function cardDrag(node, item) {
   node.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
     if (event.target.closest("button, iframe, a")) return;
+    event.preventDefault(); // 禁止浏览器原生图片拖影，也阻止兼容 mousedown 带动画布
     event.stopPropagation();
-    selectCanvas({ type: item.__type, id: item.id });
+    selectCanvas({ type: item.__type === "images" ? "image" : "draft", id: item.id });
+    node.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startY = event.clientY;
     const originX = item.x;
     const originY = item.y;
     node.classList.add("dragging");
     const move = (moveEvent) => {
+      if (moveEvent.pointerId !== event.pointerId) return;
       item.x = originX + (moveEvent.clientX - startX) / view.zoom;
       item.y = originY + (moveEvent.clientY - startY) / view.zoom;
       node.style.left = `${item.x}px`;
       node.style.top = `${item.y}px`;
     };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+    const up = (upEvent) => {
+      if (upEvent.pointerId !== event.pointerId) return;
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerup", up);
+      node.removeEventListener("pointercancel", up);
+      if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
       node.classList.remove("dragging");
       canvasPatch("/api/canvas/" + item.__type, { id: item.id, x: item.x, y: item.y });
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", up);
+    node.addEventListener("pointercancel", up);
   });
 }
 
@@ -1165,7 +1261,7 @@ function renderImages() {
     if (state.canvasSelected && state.canvasSelected.type === "image" && state.canvasSelected.id === card.id) node.classList.add("selected");
     const url = `/api/raw?p=${encodeURIComponent(card.file)}`;
     const name = card.file.split("/").pop();
-    node.innerHTML = `<img src="${url}" alt="" style="width:100%"><div class="ic-tag">${escapeHtml(name)}</div>`;
+    node.innerHTML = `<img src="${url}" alt="" draggable="false" style="width:100%"><div class="ic-tag">${escapeHtml(name)}</div>`;
     const open = document.createElement("button");
     open.className = "ic-open";
     open.textContent = "打开批注";
@@ -1288,9 +1384,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !$("fs-modal").hidden) { $("fs-modal").hidden = true; return; } // 文件夹选择器优先响应 Esc
   if (isCanvasMode() && (event.key === "v" || event.key === "V")) setTool("select");
   if (isCanvasMode() && (event.key === "a" || event.key === "A")) setTool("arrow");
-  if (isCanvasMode() && (event.key === "n" || event.key === "N")) setTool("note");
   if (isCanvasMode() && (event.key === "i" || event.key === "I")) $("file-input").click();
-  if (isCanvasMode() && (event.key === "w" || event.key === "W")) setTool("board");
   if (isCanvasMode() && (event.key === "r" || event.key === "R")) setTool("region");
   if (event.key === "Escape") { selectCanvas(null); setTool("select"); }
   if (event.key === "?" || (event.shiftKey && event.key === "/")) {
@@ -1299,7 +1393,7 @@ window.addEventListener("keydown", (event) => {
   }
   if ((event.key === "Delete" || event.key === "Backspace") && state.canvasSelected) {
     const sel = state.canvasSelected;
-    const endpoints = { arrow: ["arrows", "/api/canvas/arrows", "箭头"], note: ["notes", "/api/canvas/notes", "便签"], image: ["images", "/api/canvas/images", "图卡"], draft: ["drafts", "/api/canvas/drafts", "草稿卡"] };
+    const endpoints = { arrow: ["arrows", "/api/canvas/arrows", "箭头"], image: ["images", "/api/canvas/images", "图卡"], draft: ["drafts", "/api/canvas/drafts", "草稿卡"] };
     const [listKey, endpoint, label] = endpoints[sel.type] || [];
     if (listKey) {
       canvasApi(`${endpoint}?id=${encodeURIComponent(sel.id)}`, { method: "DELETE" })
@@ -1499,6 +1593,7 @@ async function loadAnnotations() {
   await renderDocument();
   const decayed = state.mode === "image" ? 0 : await anchorAll();
   renderRegions();
+  bindImageSelection();
   for (const annotation of state.annotations) {
     if (annotation.x === undefined) {
       annotation.x = RAIL_X;
@@ -1538,7 +1633,6 @@ async function openDoc(path, { push = true } = {}) {
   $("btn-export").hidden = state.mode !== "image";
   document.querySelectorAll("#tree .file").forEach((node) => node.classList.toggle("current", node.dataset.path === path));
   await loadAnnotations();
-  bindImageSelection();
   initialView();
 }
 
@@ -1577,14 +1671,54 @@ async function loadTree() {
   const data = await res.json();
   state.vaultRoot = data.root || state.vaultRoot;
   $("vault").textContent = data.root;
-  const dot = { text: "#6b6864", pdf: "#c99537", image: "#6fa055" };
-  const render = (nodes, depth) => nodes.map((node) => node.type === "dir"
-    ? `<div class="dir" style="padding-left:${20 + depth * 12}px">${escapeHtml(node.name)}</div>${render(node.children || [], depth + 1)}`
-    : `<div class="file" data-path="${escapeHtml(node.path)}" title="${escapeHtml(node.path)}" style="padding-left:${20 + depth * 12}px"><i style="background:${dot[node.kind] || dot.text}"></i>${escapeHtml(node.name)}</div>`).join("");
+  const dot = { text: "#777168", pdf: "#c99537", image: "#6fa055" };
+  const storageKey = `coeditor.tree.expanded:${data.root || ""}`;
+  let savedExpanded = null;
+  try {
+    const stored = localStorage.getItem(storageKey);
+    savedExpanded = stored ? new Set(JSON.parse(stored)) : null;
+  } catch { savedExpanded = null; }
+  const render = (nodes, depth) => nodes.map((node) => {
+    if (node.type === "dir") {
+      const expanded = savedExpanded ? savedExpanded.has(node.path) : depth === 0;
+      return `<div class="tree-node${expanded ? " expanded" : ""}" data-dir="${escapeAttr(node.path)}">
+        <button class="tree-row dir" type="button" aria-expanded="${expanded}" style="--depth:${depth}" title="${escapeAttr(node.path)}">
+          <span class="twistie">›</span><span class="folder-icon"></span><span class="tree-name">${escapeHtml(node.name)}</span>
+        </button>
+        <div class="tree-children">${render(node.children || [], depth + 1)}</div>
+      </div>`;
+    }
+    return `<button class="tree-row file" type="button" data-path="${escapeAttr(node.path)}" title="${escapeAttr(node.path)}" style="--depth:${depth}"><i style="background:${dot[node.kind] || dot.text}"></i><span class="tree-name">${escapeHtml(node.name)}</span></button>`;
+  }).join("");
   $("tree").innerHTML = render(data.tree, 0);
+  const saveExpanded = () => {
+    const dirs = [...$("tree").querySelectorAll(".tree-node.expanded")].map((node) => node.dataset.dir);
+    localStorage.setItem(storageKey, JSON.stringify(dirs));
+  };
+  $("tree").querySelectorAll(".tree-node > .dir").forEach((row) => {
+    row.addEventListener("click", () => {
+      const node = row.parentElement;
+      const expanded = node.classList.toggle("expanded");
+      row.setAttribute("aria-expanded", String(expanded));
+      saveExpanded();
+    });
+  });
   $("tree").querySelectorAll(".file").forEach((node) => {
     node.addEventListener("click", () => openDoc(node.dataset.path));
   });
+  const current = state.path && $("tree").querySelector(`.file[data-path="${CSS.escape(state.path)}"]`);
+  if (current) {
+    current.classList.add("current");
+    let parent = current.parentElement;
+    while (parent && parent !== $("tree")) {
+      if (parent.classList.contains("tree-node")) {
+        parent.classList.add("expanded");
+        const row = parent.querySelector(":scope > .dir");
+        if (row) row.setAttribute("aria-expanded", "true");
+      }
+      parent = parent.parentElement;
+    }
+  }
 }
 
 /* ---------------- 选区批注 ---------------- */
@@ -1796,7 +1930,7 @@ $("sel-menu").addEventListener("click", async (event) => {
   pending = null;
   clearTextSelections();
   await loadAnnotations();
-  toast(kind === "highlight" ? `已高亮「${quote.slice(0, 18)}…」` : `已标记删除线「${quote.slice(0, 18)}…」`);
+  toast(kind === "highlight" ? `已保留「${quote.slice(0, 18)}…」` : `已标记删除线「${quote.slice(0, 18)}…」`);
 });
 
 function openComposer() {
@@ -2073,10 +2207,8 @@ $("viewport").addEventListener("mousedown", (event) => {
   if (!isCanvasMode()) return;
   // PDF 区域框选（苹果预览式）：区域工具激活时，落在 PDF 页上的拖拽画框选批注
   if (state.canvasTool === "region" && event.target.closest(".pdf-page")) { startPdfRegionDraft(event); return; }
-  if (event.target.closest(".card") || event.target.closest("#page") || event.target.closest("#composer") || event.target.closest(".note") || event.target.closest(".arrow-g")) return;
+  if (event.target.closest(".card, .image-card, .draft-card") || event.target.closest("#page") || event.target.closest("#composer") || event.target.closest(".note") || event.target.closest(".arrow-g")) return;
   if (state.canvasTool === "arrow") { startArrowDraft(event); return; }
-  if (state.canvasTool === "board") { placeBoard(event); setTool("select"); return; }
-  if (state.canvasTool === "note") { placeNote(event); return; }
   if (state.canvasTool === "image") { $("file-input").click(); return; }
   if (!event.target.closest("#toolbox")) selectCanvas(null);
   const startX = event.clientX;
@@ -2130,7 +2262,7 @@ $("btn-focus").addEventListener("click", (event) => {
   el.dataset.on = next;
   document.body.classList.toggle("focus-active", next === "1");
   document.body.classList.toggle("round-only", next === "2");
-  el.textContent = next === "1" ? "批注：仅生效" : next === "2" ? "批注：本轮" : "批注：全部";
+  el.textContent = next === "1" ? "批注：当前" : next === "2" ? "批注：本轮" : "批注：全部";
 });
 $("btn-lines").addEventListener("click", (event) => {
   const on = event.currentTarget.dataset.on === "1";
@@ -2176,36 +2308,35 @@ function constraintsText() {
   const active = state.annotations.filter((item) => item.status === "active");
   const current = active.filter((item) => roundOf(item) === round).sort((a, b) => b.weight - a.weight);
   const older = active.filter((item) => roundOf(item) !== round).sort((a, b) => roundOf(b) - roundOf(a) || b.weight - a.weight);
-  // 手绘箭头标签与便签同样是人类意图，纳入约束清单
+  // 画布只保留箭头；便签/白板已从产品交互中移除。
   const canvasArrows = state.arrows.filter((item) => ownsCanvas(item) && (item.label || "").trim());
-  const canvasNotes = state.notes.filter((item) => ownsCanvas(item) && (item.text || "").trim() && item.type !== "board");
+  const noOf = (item) => item.no || item.id;
   const KIND_LINE = {
-    highlight: (item) => `- [${item.id}·高亮]「${item.quote.slice(0, 60)}」\n  （人标记了重点，修改时保留并优先呼应此处）`,
-    strike: (item) => `- [${item.id}·删除线]「${item.quote.slice(0, 60)}」\n  （人标记删除线：建议删除或重写此段）`,
+    highlight: (item) => `- [${noOf(item)}·保留]「${item.quote.slice(0, 60)}」\n  （人标记保留：这段内容很好，必须保留，不要改写删除）`,
+    strike: (item) => `- [${noOf(item)}·删除线]「${item.quote.slice(0, 60)}」\n  （人标记删除线：建议删除或重写此段）`,
   };
   const annLine = (item) => {
     if (KIND_LINE[item.kind]) return KIND_LINE[item.kind](item);
     return [
-      `- [${item.id}] w=${Number(item.weight ?? 1).toFixed(2)} 「${item.quote.slice(0, 60)}」`,
+      `- [${noOf(item)}] w=${Number(item.weight ?? 1).toFixed(2)} 「${item.quote.slice(0, 60)}」`,
       `  ${item.body}`,
-      ...(item.conflicts_with || []).length ? [`  ⚠ 与 ${item.conflicts_with.join("/")} 冲突，未经裁定前先询问用户`] : [],
+      ...(item.conflicts_with || []).length ? [`  ⚠ 与 ${item.conflicts_with.map(noOf).join("/")} 冲突，未经裁定前先询问用户`] : [],
     ];
   };
   const lines = [
     `# ${state.path} · 修改前必读的人类约束`,
     "",
-    `## 批次 ${round}（当前进行中）· ${current.length} 条`,
+    `## 第 ${round} 批次（本轮 · 进行中）· ${current.length} 条`,
     "",
     ...current.flatMap(annLine),
   ];
   if (older.length) {
-    lines.push("", `## 历史批次（仍然生效的旧约束，通常已被处理过，仅供参照）· ${older.length} 条`, "");
+    lines.push("", `## 历史批次（仍需参考的旧约束）· ${older.length} 条`, "");
     lines.push(...older.flatMap(annLine));
   }
-  if (canvasArrows.length || canvasNotes.length) {
+  if (canvasArrows.length) {
     lines.push("", `## 画布手写（同属人类意图）`, "");
     lines.push(...canvasArrows.map((item) => `- [${item.id}·箭头]「${item.label.trim()}」\n  （人在画布上手写的视觉指令）`).flat());
-    lines.push(...canvasNotes.map((item) => `- [${item.id}·便签] ${item.text.trim()}`).flat());
   }
   return lines.join("\n");
 }
@@ -2221,19 +2352,23 @@ function renderDrawer() {
     groups.get(r).push(item);
   }
   const itemHtml = (item) => `
-    <div class="d-item" data-status="${item.status}">
+    <div class="d-item" data-id="${item.id}" data-status="${item.status}">
       <div class="d-item-head">
-        <span class="c-id">${item.id}</span>
-        ${item.kind === "highlight" ? '<span class="c-kind hl">高亮</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
-        <span class="c-badge">${LABELS[item.status] || item.status}</span>
+        <span class="c-id">${item.no || item.id}</span>
+        ${item.kind === "highlight" ? '<span class="c-kind hl">保留</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
+        ${item.status === "active" ? '<i class="live-dot" title="当前使用"></i>' : `<span class="c-badge">${LABELS[item.status] || item.status}</span>`}
         <span class="c-weight">${weightDots(item.weight)}</span>
       </div>
       ${item.body ? `<div class="d-item-body">${escapeHtml(item.body)}</div>` : ""}
       <div class="d-item-quote">「${escapeHtml(item.quote.slice(0, 50))}」</div>
+      <div class="d-actions">
+        ${item.kind === "highlight" ? "" : '<button data-d-act="edit">编辑</button>'}
+        <button data-d-act="delete" class="danger">${item.kind === "highlight" ? "取消保留" : "删除"}</button>
+      </div>
     </div>`;
   let html = "";
   for (const [r, items] of groups) {
-    html += `<div class="d-round">${r === round ? `批次 ${r} · 进行中` : `批次 ${r} · 历史`}</div>`;
+    html += `<div class="d-round">${r === round ? `第 ${r} 批次 · 进行中` : `第 ${r} 批次 · 历史`}</div>`;
     html += items.map(itemHtml).join("");
   }
   $("drawer-body").innerHTML = html || '<div class="d-empty">还没有批注 —— 选中文字开始第一条</div>';
@@ -2244,6 +2379,42 @@ $("btn-edit-ask").addEventListener("click", askEditWithAnnotations);
 $("btn-drawer").addEventListener("click", () => {
   renderDrawer();
   $("drawer").hidden = !$("drawer").hidden;
+});
+$("drawer-body").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-d-act]");
+  if (!button) return;
+  const row = button.closest(".d-item");
+  const item = state.annotations.find((entry) => entry.id === row.dataset.id);
+  if (!item) return;
+  if (button.dataset.dAct === "delete") {
+    const res = await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+      method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id }),
+    });
+    if (!res.ok) return toast("删除失败，批注未改变");
+    await loadAnnotations();
+    renderDrawer();
+    toast(item.kind === "highlight" ? "已取消保留" : "批注已删除（写前备份已保留）");
+    return;
+  }
+  if (button.dataset.dAct === "edit") {
+    const body = row.querySelector(".d-item-body");
+    const textarea = document.createElement("textarea");
+    textarea.className = "drawer-edit";
+    textarea.value = item.body || "";
+    if (body) body.replaceWith(textarea); else row.querySelector(".d-item-quote").before(textarea);
+    row.querySelector(".d-actions").innerHTML = '<button data-d-act="save">保存</button><button data-d-act="cancel">取消</button>';
+    textarea.focus();
+    return;
+  }
+  if (button.dataset.dAct === "cancel") { renderDrawer(); return; }
+  if (button.dataset.dAct === "save") {
+    const textarea = row.querySelector(".drawer-edit");
+    if (!textarea || !textarea.value.trim()) return toast("批注内容不能为空");
+    await patch(item.id, { body: textarea.value.trim(), event: "edited" });
+    await loadAnnotations();
+    renderDrawer();
+    toast("批注已更新");
+  }
 });
 $("drawer-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("drawer-copy").addEventListener("click", async () => {
@@ -2309,9 +2480,42 @@ async function fsLoad(dir) {
   $("fs-up").disabled = !data.up;
 }
 
-$("btn-vault").addEventListener("click", () => {
-  $("fs-modal").hidden = false;
-  fsLoad("");
+async function switchVault(path) {
+  const res = await fetch("/api/vault", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) { toast("打开失败：目录不存在或不可访问"); return false; }
+  const data = await res.json();
+  $("fs-modal").hidden = true;
+  state.vaultRoot = data.root;
+  await resetDocView();
+  await loadTree();
+  toast(`已打开 ${data.root}`);
+  return true;
+}
+
+$("btn-vault").addEventListener("click", async () => {
+  const button = $("btn-vault");
+  button.disabled = true;
+  button.textContent = "正在选择…";
+  try {
+    const res = await fetch("/api/folder-picker", { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      await switchVault(data.path);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (data.error === "cancelled") return;
+    // 非 macOS 或系统选择器不可用时保留网页目录浏览作为兜底。
+    $("fs-modal").hidden = false;
+    await fsLoad("");
+  } finally {
+    button.disabled = false;
+    button.textContent = "打开文件夹…";
+  }
 });
 $("fs-close").addEventListener("click", () => { $("fs-modal").hidden = true; });
 $("fs-modal").addEventListener("mousedown", (event) => {
@@ -2328,18 +2532,7 @@ $("fs-list").addEventListener("click", (event) => {
 $("fs-up").addEventListener("click", () => { if (fsState.up) fsLoad(fsState.up); });
 $("fs-open").addEventListener("click", async () => {
   if (!fsState.cur) return;
-  const res = await fetch("/api/vault", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: fsState.cur }),
-  });
-  if (!res.ok) { toast("打开失败：目录不存在或不可访问"); return; }
-  const data = await res.json();
-  $("fs-modal").hidden = true;
-  state.vaultRoot = data.root;
-  await resetDocView();
-  await loadTree();
-  toast(`已切换到 ${data.root}`);
+  await switchVault(fsState.cur);
 });
 
 /* ---------------- 外部修改感知：只重新锚定，不自动推进批次 ---------------- */
