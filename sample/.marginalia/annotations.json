@@ -367,6 +367,39 @@
           "end": 680
         }
       }
+    ],
+    "研究设计-技术附录.pdf": [
+      {
+        "id": "A-0001",
+        "kind": "region",
+        "round": 2,
+        "quote": "第 1 页 区域 (0.28, 0.22)",
+        "prefix": "",
+        "suffix": "",
+        "body": "这张图的图例顺序与正文叙述不一致，Agent 重排时按正文顺序调整",
+        "x": 850,
+        "y": 320,
+        "region": {
+          "x": 0.28,
+          "y": 0.22,
+          "w": 0.44,
+          "h": 0.3,
+          "page": 1
+        },
+        "image": null,
+        "created": "2026-09-04T06:38:49.430Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T06:38:49.434Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      }
     ]
   },
   "arrows": [

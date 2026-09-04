@@ -55,8 +55,10 @@ async function readSidecar() {
 const CANVAS_KEYS = ["arrows", "notes", "images", "drafts"];
 async function writeSidecar(data) {
   let current = null;
+  let currentRaw = null;
   try {
-    current = JSON.parse(await readFile(SIDECAR, "utf8"));
+    currentRaw = await readFile(SIDECAR, "utf8");
+    current = JSON.parse(currentRaw);
   } catch (err) {
     // 文件不存在 = 首次创建，合法跳过守卫；存在但读不了 = 拒绝写（绝不拿空数据覆盖事实源）
     if (!err || err.code !== "ENOENT") throw new Error(`sidecar-unreadable-refusing-write: ${String(err && err.message || err)}`);
@@ -75,6 +77,10 @@ async function writeSidecar(data) {
         throw new Error(`blocked-destructive-canvas-loss: ${key} ${before} -> ${after}`);
       }
     }
+    // 写前轮转备份：当前版本原样留存 prev.json，任何事故一步回滚（cp prev.json annotations.json）
+    try {
+      await writeFile(`${SIDECAR}.prev`, currentRaw, "utf8");
+    } catch { /* 备份失败不阻塞正常写 */ }
   }
   for (const key of CANVAS_KEYS) {
     if (!Array.isArray(data[key])) data[key] = [];

@@ -4,6 +4,8 @@
 
 ![Cowart 交互模式](docs/screenshots/cowart-mode.png)
 
+![PDF 区域批注](docs/screenshots/pdf-region.png)
+
 ## 安装 / 启动
 
 ```bash
@@ -115,6 +117,8 @@ claude mcp add coeditor -- node /abs/path/coeditor/mcp-stdio.mjs /abs/path/vault
 - **批注卡降噪（v0.6.2）**：生效批注不再显示「生效」徽标、权重点仅衰减后显示、操作按钮悬停浮现、卡片内边距收紧
 - **Word (docx) 渲染批注（M6）**：mammoth 转 HTML（vendor），标题 / 表格 / 列表语义渲染，选中即批注，锚定走通用管线
 - **可视化文件夹选择器（v0.6.1）**：左栏「打开文件夹…」弹目录浏览器（常用目录快捷入口 + 逐级进入 + 打开此处），无需手输路径；服务端只列子目录不读文件内容
+
+![文件夹选择器](docs/screenshots/folder-picker.png)
 - 本地文件夹 → 网页文件树（md / txt / html / json / csv / **pdf** / **docx** / **图片**），左栏一键切换 vault
 - **vault 切换防误判（v0.6.1）**：目录被其他标签页 / CLI 切走时，页面轮询先验服务端当前 vault 再比 mtime，杜绝同相对路径误读别目录文件导致批次虚推进
 - **画布边界（M6）**：视野 clamp 到内容附近（±600px 余量），不再漫无边际

@@ -97,7 +97,7 @@ async function exportCanvas(folder, doc) {
     const conflicts = (item.conflicts_with || []).length ? `\n> [!warning] 与 ${item.conflicts_with.join(" / ")} 冲突，待裁定` : "";
     const superseded = (item.supersedes || []).length ? `\n> 替代 ${item.supersedes.join(" / ")}` : "";
     const anchor = item.region
-      ? `区域 (${item.region.x.toFixed(2)}, ${item.region.y.toFixed(2)})${item.image ? ` · ${item.image}` : ""}`
+      ? `${item.region.page ? `第 ${item.region.page} 页 ` : ""}区域 (${item.region.x.toFixed(2)}, ${item.region.y.toFixed(2)})${item.image ? ` · ${item.image}` : ""}`
       : `「${item.quote.slice(0, 80)}」`;
     nodes.push({
       id: item.id,
