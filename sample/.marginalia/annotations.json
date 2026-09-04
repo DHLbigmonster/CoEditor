@@ -503,7 +503,7 @@
   "drafts": [],
   "demo": true,
   "note": "示例 vault：所有文档与数据均为虚构，仅用于演示 CoEditor。",
-  "activeRound": 2,
+  "activeRound": 5,
   "roundHistory": [
     {
       "round": 0,
@@ -512,6 +512,18 @@
     {
       "round": 1,
       "closedAt": "2026-09-04T05:42:14.965Z"
+    },
+    {
+      "round": 2,
+      "closedAt": "2026-09-04T08:27:59.889Z"
+    },
+    {
+      "round": 3,
+      "closedAt": "2026-09-04T08:28:01.422Z"
+    },
+    {
+      "round": 4,
+      "closedAt": "2026-09-04T08:28:02.141Z"
     }
   ]
 }

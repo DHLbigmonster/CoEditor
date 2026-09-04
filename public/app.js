@@ -375,6 +375,7 @@ function cardElement(annotation) {
   const KIND_BADGE = { highlight: '<span class="c-kind hl">高亮</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
   const roundNo = Number.isFinite(annotation.round) ? annotation.round : 0;
   const isCurrentRound = roundNo === (state.round ?? 0);
+  card.dataset.roundCur = isCurrentRound ? "1" : "0";
   card.innerHTML = `
     <div class="c-head">
       <span class="c-id">${annotation.id}</span>
@@ -1987,10 +1988,12 @@ $("btn-theme").addEventListener("click", () => {
   $("btn-theme").textContent = document.body.classList.contains("paper-dark") ? "纸张：暗色" : "纸张：明亮";
 });
 $("btn-focus").addEventListener("click", (event) => {
-  const on = event.currentTarget.dataset.on === "1";
-  event.currentTarget.dataset.on = on ? "0" : "1";
-  document.body.classList.toggle("focus-active", !on);
-  event.currentTarget.textContent = on ? "批注：全部" : "批注：仅生效";
+  const el = event.currentTarget;
+  const next = el.dataset.on === "1" ? "2" : el.dataset.on === "2" ? "0" : "1";
+  el.dataset.on = next;
+  document.body.classList.toggle("focus-active", next === "1");
+  document.body.classList.toggle("round-only", next === "2");
+  el.textContent = next === "1" ? "批注：仅生效" : next === "2" ? "批注：本轮" : "批注：全部";
 });
 $("btn-lines").addEventListener("click", (event) => {
   const on = event.currentTarget.dataset.on === "1";

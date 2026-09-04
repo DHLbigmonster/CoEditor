@@ -959,3 +959,7 @@ body[data-workspace-mode="edit"] #cards { display: none; }
   body[data-workspace-mode="read"] #cards { display: none; }
   body[data-workspace-mode="read"] #page { margin: 0 auto; width: min(960px, 100%); }
 }
+
+/* ================= v0.7.1 · 批注筛选三态（仅生效 / 本轮 / 全部） ================= */
+body.round-only .card[data-round-cur="0"] { opacity: .16; }
+body.round-only .card[data-round-cur="0"]:hover { opacity: .85; }

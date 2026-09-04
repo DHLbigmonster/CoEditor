@@ -4,9 +4,9 @@
 
 零依赖核心（Node 内置模块 + 原生前端；PDF.js 与 mammoth 为 vendor 的渲染库），画布式本地文档批注层：人在网页上写字，批注按原文位置落锚、永不删除，Agent 改文档时自动重定位，批注作为**约束**回流给 Agent。**M5：Markdown 阅读 ⇄ 编辑双态、选区浮条（批注 / 高亮 / 删除线）、批次系统、白板。M6：PDF 连续阅读 + 列布局、Word (docx) 渲染批注、HTML 荧光标记、画布边界。v0.6.1：可视化文件夹选择器、PDF 选区批注解禁（拖选即浮条）、修复箭头 SVG 层拦截文档鼠标事件、vault 切换防批次虚推进。** 数据目录沿用 `.marginalia/`（历史约定，纯 JSON 可 git 管理）。
 
-![Cowart 交互模式](docs/screenshots/cowart-mode.png)
+![阅读模式：暖白纸感 · 文档全尺寸 · 批注侧栏同屏](docs/screenshots/read-md.png)
 
-![PDF 区域批注](docs/screenshots/pdf-region.png)
+![画布模式：PDF 连续纸 · 区域批注 · 牵引线](docs/screenshots/canvas-pdf.png)
 
 ## 安装 / 启动
 
