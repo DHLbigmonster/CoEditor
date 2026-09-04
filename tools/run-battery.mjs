@@ -52,6 +52,15 @@ for (let i = 0; i < 30; i += 1) {
   } catch { await sleep(300); }
 }
 if (!ready) { console.error(`❌ 隔离服务启动失败（端口 ${PORT} 被其他实例占用或 root 不符）`); server.kill(); process.exit(2); }
+
+// 激活目标页到前台：后台标签被浏览器节流（IntersectionObserver 不触发 → PDF 惰性渲染不推进；
+// 定时器降频 → docx 解析/浮条来不及出），会让只改了测试文件的正常代码「大面积回归」。
+try {
+  const tabs = await (await fetch("http://127.0.0.1:9333/json/list")).json();
+  const base = tabs.find((t) => t.type === "page" && (t.url || "").startsWith(BASE));
+  const target = base || await (await fetch(`http://127.0.0.1:9333/json/new?${BASE}`, { method: "PUT" })).json();
+  if (target?.id) await fetch(`http://127.0.0.1:9333/json/activate/${target.id}`);
+} catch { /* 激活失败不致命，继续跑 */ }
 console.log(`\n🧪 CoEditor 测试电池 → ${BASE}（vault: ${VAULT}）\n`);
 
 // 套件清单：[名称, 脚本, 通过判据(对 stdout 的正则数组, 条数为出现次数下限)]
