@@ -5,9 +5,15 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
-const ROOT = resolve(process.argv[2] || process.cwd());
+let ROOT = resolve(process.argv[2] || process.cwd());
 const PORT = Number(process.env.COEDITOR_PORT || 4400);
-const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
+let SIDECAR = join(ROOT, ".marginalia", "annotations.json");
+
+function setVault(next) {
+  ROOT = next;
+  SIDECAR = join(ROOT, ".marginalia", "annotations.json");
+  UISTATE = join(ROOT, ".marginalia", "ui-state.json");
+}
 
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
 const BINARY_EXT = new Set([".pdf"]);
@@ -35,19 +41,25 @@ function safeResolve(relPath) {
 async function readSidecar() {
   try {
     return JSON.parse(await readFile(SIDECAR, "utf8"));
-  } catch {
-    return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
+  } catch (err) {
+    // 文件不存在 = 首次使用，给空结构；存在但读不了 = 数据危险，拒绝服务（绝不返回空结构，防止空壳覆盖）
+    if (err && err.code === "ENOENT") return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
+    throw new Error(`sidecar-unreadable: ${String(err && err.message || err)}`);
   }
 }
 
 /* 防破坏保存（借鉴 Cowart blocked-destructive-image-loss）：
-   批注与画布元素永不无故消失——写盘瞬间任一集合数量减少，直接拒绝保存 */
+   批注与画布元素永不无故消失——写盘瞬间任一集合数量减少，直接拒绝保存。
+   读不了当前状态时也拒绝写：宁可失败，绝不拿空/半读数据覆盖事实源 */
 const CANVAS_KEYS = ["arrows", "notes", "images", "drafts"];
 async function writeSidecar(data) {
   let current = null;
   try {
     current = JSON.parse(await readFile(SIDECAR, "utf8"));
-  } catch { /* 首次创建或损坏时跳过守卫 */ }
+  } catch (err) {
+    // 文件不存在 = 首次创建，合法跳过守卫；存在但读不了 = 拒绝写（绝不拿空数据覆盖事实源）
+    if (!err || err.code !== "ENOENT") throw new Error(`sidecar-unreadable-refusing-write: ${String(err && err.message || err)}`);
+  }
   if (current) {
     const countDocs = (d) => Object.values(d.docs || {}).reduce((acc, list) => acc + (Array.isArray(list) ? list.length : 0), 0);
     const beforeDocs = countDocs(current);
@@ -157,7 +169,7 @@ async function listTree(dir = ROOT, base = ROOT) {
 
 /* UI 状态：前端上报当前文档/选中/视口；落盘 .marginalia/ui-state.json 供 MCP 进程读取
    （Cowart get_selection 对应物） */
-const UISTATE = join(ROOT, ".marginalia", "ui-state.json");
+let UISTATE = join(ROOT, ".marginalia", "ui-state.json");
 let uiState = { path: null, selected: null, updated: null };
 try { uiState = JSON.parse(readFileSync(UISTATE, "utf8")); } catch { /* 首次无文件 */ }
 
@@ -183,6 +195,59 @@ const server = http.createServer(async (req, res) => {
       }
       const text = await readFile(target, "utf8");
       return send(200, JSON.stringify({ path: url.searchParams.get("p"), text, mtime: info.mtimeMs }));
+    }
+
+    /* ---------- 编辑写回：文本文件保存（VSCode 式编辑态） ---------- */
+    if (url.pathname.startsWith("/api/write")) {
+      const body = await new Promise((ok) => {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
+      });
+      const target = safeResolve(url.searchParams.get("p") || body.p);
+      if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
+      if (!TEXT_EXT.has(extname(target).toLowerCase())) return send(400, JSON.stringify({ error: "unsupported extension" }));
+      if (typeof body.text !== "string") return send(400, JSON.stringify({ error: "text required" }));
+      const info = await stat(target).catch(() => null);
+      if (info && Number.isFinite(body.baseMtime) && info.mtimeMs !== body.baseMtime) {
+        return send(409, JSON.stringify({ error: "file-changed-externally", mtime: info.mtimeMs }));
+      }
+      await writeFile(target, body.text);
+      const after = await stat(target);
+      return send(200, JSON.stringify({ ok: true, mtime: after.mtimeMs }));
+    }
+
+    /* ---------- 批次：一次「保存本批次」或一次外部修改 = 推进一轮 ---------- */
+    if (url.pathname.startsWith("/api/rounds")) {
+      const body = await new Promise((ok) => {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
+      });
+      const data = await readSidecar();
+      if (body.action === "save") {
+        const closed = data.activeRound ?? 0;
+        data.activeRound = closed + 1;
+        data.roundHistory = data.roundHistory || [];
+        data.roundHistory.push({ round: closed, closedAt: new Date().toISOString() });
+        await writeSidecar(data);
+        return send(200, JSON.stringify({ ok: true, closed, activeRound: data.activeRound }));
+      }
+      return send(200, JSON.stringify({ activeRound: data.activeRound ?? 0 }));
+    }
+
+    /* ---------- 切换 vault（VSCode 式打开本地文件夹） ---------- */
+    if (url.pathname.startsWith("/api/vault") && req.method === "POST") {
+      const body = await new Promise((ok) => {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
+      });
+      const next = resolve(String(body.path || "").trim());
+      const info = await stat(next).catch(() => null);
+      if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
+      setVault(next);
+      return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
     }
 
     if (url.pathname.startsWith("/api/supersede")) {
@@ -296,6 +361,7 @@ const server = http.createServer(async (req, res) => {
             x: Number.isFinite(body.x) ? body.x : 200,
             y: Number.isFinite(body.y) ? body.y : 200,
             text: typeof body.text === "string" ? body.text.slice(0, 2000) : "",
+            type: body.type === "board" ? "board" : "note",
             doc: typeof body.doc === "string" && body.doc ? body.doc : null,
             created: new Date().toISOString(),
           };
@@ -433,13 +499,20 @@ const server = http.createServer(async (req, res) => {
       });
 
       if (req.method === "POST") {
+        const KINDS = new Set(["region", "text", "highlight", "strike"]);
+        const kind = KINDS.has(body.kind) ? body.kind : "text";
+        const isMark = kind === "highlight" || kind === "strike";
+        if (!isMark && kind !== "region" && !(body.body || "").trim()) {
+          return send(400, JSON.stringify({ error: "annotation body required" }));
+        }
         const item = {
           id: nextSeq(list, "A"),
-          kind: body.kind === "region" ? "region" : "text",
+          kind,
+          round: Number.isFinite(data.activeRound) ? data.activeRound : 0,
           quote: body.quote || "",
           prefix: body.prefix || "",
           suffix: body.suffix || "",
-          body: body.body || "",
+          body: (body.body || "").trim(),
           x: Number.isFinite(body.x) ? body.x : 850,
           y: Number.isFinite(body.y) ? body.y : 0,
           region: body.region && ["x", "y", "w", "h"].every((k) => Number.isFinite(body.region[k]))

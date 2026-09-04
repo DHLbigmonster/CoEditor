@@ -14,6 +14,7 @@
       <span>CoEditor</span>
     </div>
     <div class="vault" id="vault"></div>
+    <button id="btn-vault" class="ghost" title="像 VSCode 一样打开另一个本地文件夹">打开文件夹…</button>
   </div>
   <div class="rail-scroll">
     <div class="rail-label">文档</div>
@@ -30,11 +31,12 @@
     <button id="rail-toggle" class="icon" title="收起侧栏">◧</button>
     <div class="doc-title" id="docpath">未选择文档</div>
     <div class="bar-tools">
-      <button id="btn-edit-ask" class="chip ask" title="按标注修改：组装完整修改指令（目标文件 + 逐条约束 + 标注图），一键复制给 Agent">按标注修改</button>
-      <button id="btn-layout" class="chip">整理布局</button>
+      <button id="btn-round" class="chip ask" title="锁定当前批次：本轮批注归档，之后的批注进入下一批次（Agent 改完文档后也会自动推进）">保存本批次</button>
+      <button id="btn-edit-ask" class="chip" title="组装完整修改指令（目标文件 + 逐条约束 + 标注图），一键复制给 Agent">复制 Agent 指令</button>
+      <button id="btn-layout" class="chip" title="卡片排序归位，回到默认查阅视图">整理布局</button>
       <button id="btn-focus" class="chip" data-on="1">只看生效</button>
       <button id="btn-lines" class="chip" data-on="0" title="连线降噪：开启后仅悬停/选中的批注显示牵引线">连线</button>
-      <button id="btn-drawer" class="chip">约束清单</button>
+      <button id="btn-drawer" class="chip">批注历史</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
       <button id="btn-out" class="icon" title="缩小">−</button>
@@ -69,6 +71,9 @@
       <button class="tool" data-tool="image" title="贴图：选择图片 / 拖入 / 粘贴到画布（I）">
         <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="7.2" cy="8" r="1.4" fill="currentColor"/><path d="M4 14 L9 9.5 L12.5 12.5 L15 10.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
       </button>
+      <button class="tool" data-tool="board" title="白板：点击画布放置一块可写的白板（W）">
+        <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 14 v3 M7 17 h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
       <span class="tool-sep"></span>
       <span class="swatches" id="swatches" title="箭头颜色">
         <button class="swatch red active" data-color="red" title="红"></button>
@@ -87,13 +92,16 @@
       <div class="sh-card">
         <div class="sh-head">快捷键 <button id="sh-close" class="icon">✕</button></div>
         <table>
+          <tr><td>双击文档</td><td>进入 Markdown 编辑（⌘S 保存 / 「完成」退出）</td></tr>
+          <tr><td>选中文字</td><td>弹出菜单：批注 / 高亮 / 删除线</td></tr>
           <tr><td><kbd>V</kbd></td><td>选择 / 平移</td></tr>
           <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>
           <tr><td><kbd>N</kbd></td><td>便签（点击画布放置）</td></tr>
+          <tr><td><kbd>W</kbd></td><td>白板（点击画布放置，草稿区不计入约束）</td></tr>
           <tr><td><kbd>I</kbd></td><td>贴图（也可拖图 / ⌘V 粘贴进画布）</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>回选择工具 / 取消输入</td></tr>
           <tr><td><kbd>Delete</kbd></td><td>删除选中的箭头 / 便签 / 图卡 / 草稿卡</td></tr>
-          <tr><td>双击</td><td>改箭头标签 / 编辑便签</td></tr>
+          <tr><td>双击画布元素</td><td>改箭头标签 / 编辑便签</td></tr>
           <tr><td>⌘+滚轮</td><td>缩放 · 拖拽空白处平移</td></tr>
         </table>
       </div>
@@ -103,12 +111,18 @@
 
 <aside id="drawer" hidden>
   <div class="d-head">
-    <span>约束清单 · 交给 Agent 的修改前必读</span>
+    <span>批注历史 · 按批次</span>
     <button id="drawer-copy" class="chip">复制</button>
     <button id="drawer-close" class="icon">✕</button>
   </div>
   <div id="drawer-body"></div>
 </aside>
+
+<div id="sel-menu" hidden>
+  <button data-sel-act="comment" title="写批注（保留编号，成为 Agent 约束）">批注</button>
+  <button data-sel-act="highlight" title="高亮标记：给这段文字上色，Agent 可感知">高亮</button>
+  <button data-sel-act="strike" title="删除线：标记建议删除此段">删除线</button>
+</div>
 
 <div id="composer" hidden>
   <div class="c-quote" id="composer-quote"></div>

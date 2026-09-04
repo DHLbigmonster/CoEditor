@@ -1,336 +1,399 @@
 {
- "version": 1,
- "docs": {
-  "研究设计笔记.md": [
-   {
-    "id": "A-0001",
-    "quote": "净利润为46%",
-    "prefix": "",
-    "suffix": "",
-    "body": "这个口径绝对不能再改，评审盯的就是这里。若要调整必须先问我。",
-    "x": 850,
-    "y": 120,
-    "created": "2026-09-03T15:44:29.619Z",
-    "status": "deprecated",
-    "weight": 0,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:44:29.622Z"
-     },
-     {
-      "event": "superseded_by_A-0005",
-      "at": "2026-09-03T15:58:06.128Z"
-     },
-     {
-      "event": "guard-test",
-      "at": "2026-09-04T01:33:39.063Z"
-     }
+  "version": 1,
+  "docs": {
+    "研究设计笔记.md": [
+      {
+        "id": "A-0001",
+        "quote": "净利润为46%",
+        "prefix": "",
+        "suffix": "",
+        "body": "这个口径绝对不能再改，评审盯的就是这里。若要调整必须先问我。",
+        "x": 850,
+        "y": 120,
+        "created": "2026-09-03T15:44:29.619Z",
+        "status": "deprecated",
+        "weight": 0,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:44:29.622Z"
+          },
+          {
+            "event": "superseded_by_A-0005",
+            "at": "2026-09-03T15:58:06.128Z"
+          },
+          {
+            "event": "guard-test",
+            "at": "2026-09-04T01:33:39.063Z"
+          }
+        ],
+        "supersedes": [],
+        "offsets": {
+          "start": 928,
+          "end": 935
+        },
+        "conflicts_with": []
+      },
+      {
+        "id": "A-0002",
+        "quote": "3,842 个门店—季度观测值",
+        "prefix": "",
+        "suffix": "",
+        "body": "样本量是全文的锚点，任何后续修改都不得与这个数字冲突。",
+        "x": 970,
+        "y": 423.333,
+        "created": "2026-09-03T15:44:29.636Z",
+        "status": "deprecated",
+        "weight": 0,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:44:29.636Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-03T15:55:02.850Z"
+          },
+          {
+            "event": "conflict_with_A-0006",
+            "at": "2026-09-03T15:59:57.521Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-03T16:34:10.383Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-03T16:34:13.948Z"
+          }
+        ],
+        "supersedes": [],
+        "offsets": {
+          "start": 267,
+          "end": 283
+        },
+        "conflicts_with": [
+          "A-0006"
+        ]
+      },
+      {
+        "id": "A-0003",
+        "quote": "92 个词条",
+        "prefix": "",
+        "suffix": "",
+        "body": "关键词表引用来源缺失，需要补一条脚注。",
+        "x": 850,
+        "y": 700,
+        "created": "2026-09-03T15:44:29.649Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:44:29.649Z"
+          }
+        ],
+        "supersedes": [],
+        "offsets": {
+          "start": 492,
+          "end": 499
+        }
+      },
+      {
+        "id": "A-0004",
+        "quote": "标准误在门店层面聚类调整",
+        "prefix": "",
+        "suffix": "",
+        "body": "聚类层级是否应提到行业×年份？待定，但不要再改回普通标准误。",
+        "x": 850,
+        "y": 1520,
+        "created": "2026-09-03T15:44:29.661Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:44:29.661Z"
+          }
+        ],
+        "supersedes": [],
+        "offsets": {
+          "start": 773,
+          "end": 785
+        }
+      },
+      {
+        "id": "A-0005",
+        "quote": "外卖业务板块的净利润为46%，远高于门店整体水平",
+        "prefix": "",
+        "suffix": "",
+        "body": "这条口径我改主意了：整体口径必须含税，含税口径下这块业务的利润率要重新算。",
+        "x": 850,
+        "y": 1240,
+        "created": "2026-09-03T15:58:06.042Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:58:06.045Z"
+          },
+          {
+            "event": "supersedes_A-0001",
+            "at": "2026-09-03T15:58:06.128Z"
+          }
+        ],
+        "supersedes": [
+          "A-0001"
+        ],
+        "conflicts_with": [],
+        "offsets": {
+          "start": 928,
+          "end": 945
+        }
+      },
+      {
+        "id": "A-0006",
+        "quote": "3,842 个门店—季度观测值",
+        "prefix": "",
+        "suffix": "",
+        "body": "样本量我需要再核对一遍，先别在正文引用这个数。",
+        "x": 888.876,
+        "y": 94.6807,
+        "created": "2026-09-03T15:59:57.512Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T15:59:57.512Z"
+          },
+          {
+            "event": "conflict_with_A-0002",
+            "at": "2026-09-03T15:59:57.521Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-03T16:34:07.716Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-03T16:34:16.132Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-03T16:34:18.412Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [
+          "A-0002"
+        ],
+        "offsets": {
+          "start": 267,
+          "end": 283
+        }
+      },
+      {
+        "id": "A-0007",
+        "kind": "region",
+        "quote": "图片 配图-数字化与坪效.png 区域 (0.04, 0.08)",
+        "prefix": "",
+        "suffix": "",
+        "body": "图 3-1 的 Y 轴刻度标签糊了，让 Agent 重出一版矢量图，字体统一用正文衬线体",
+        "x": 850,
+        "y": 0,
+        "region": {
+          "x": 0.04,
+          "y": 0.08,
+          "w": 0.08,
+          "h": 0.78
+        },
+        "image": "配图-数字化与坪效.png",
+        "created": "2026-09-04T00:32:13.439Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T00:32:13.439Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      },
+      {
+        "id": "A-0008",
+        "kind": "highlight",
+        "round": 0,
+        "quote": "山月斋",
+        "prefix": "",
+        "suffix": "",
+        "body": "重点术语，全文口径以它为准",
+        "x": 850,
+        "y": 100,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T04:47:34.904Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T04:47:34.904Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": {
+          "start": 91,
+          "end": 94
+        }
+      },
+      {
+        "id": "A-0009",
+        "kind": "strike",
+        "round": 1,
+        "quote": "远高于门店整体水平",
+        "prefix": "门店净利润率均值为 11.6%，其中外卖业务板块的净利润为46%",
+        "suffix": "。该高毛利板块",
+        "body": "",
+        "x": 850,
+        "y": 200,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T04:47:34.961Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T04:47:34.961Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": {
+          "start": 539,
+          "end": 545
+        }
+      }
     ],
-    "supersedes": [],
-    "offsets": {
-     "start": 928,
-     "end": 935
-    },
-    "conflicts_with": []
-   },
-   {
-    "id": "A-0002",
-    "quote": "3,842 个门店—季度观测值",
-    "prefix": "",
-    "suffix": "",
-    "body": "样本量是全文的锚点，任何后续修改都不得与这个数字冲突。",
-    "x": 970,
-    "y": 423.333,
-    "created": "2026-09-03T15:44:29.636Z",
-    "status": "deprecated",
-    "weight": 0,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:44:29.636Z"
-     },
-     {
-      "event": "moved",
-      "at": "2026-09-03T15:55:02.850Z"
-     },
-     {
-      "event": "conflict_with_A-0006",
-      "at": "2026-09-03T15:59:57.521Z"
-     },
-     {
-      "event": "deprecated",
-      "at": "2026-09-03T16:34:10.383Z"
-     },
-     {
-      "event": "moved",
-      "at": "2026-09-03T16:34:13.948Z"
-     }
-    ],
-    "supersedes": [],
-    "offsets": {
-     "start": 267,
-     "end": 283
-    },
-    "conflicts_with": [
-     "A-0006"
+    "配图-数字化与坪效.png": [
+      {
+        "id": "A-0001",
+        "quote": "区域 (0.72, 0.10)",
+        "prefix": "",
+        "suffix": "",
+        "body": "Q7 这组柱子颜色太重，降一档饱和度",
+        "x": 850,
+        "y": 120,
+        "created": "2026-09-03T17:05:05.210Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T17:05:05.210Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null,
+        "kind": "region",
+        "region": {
+          "x": 0.72,
+          "y": 0.1,
+          "w": 0.16,
+          "h": 0.72
+        }
+      },
+      {
+        "id": "A-0002",
+        "quote": "区域 (0.05, 0.86)",
+        "prefix": "",
+        "suffix": "",
+        "body": "注的文字太小，正文里至少要 10pt",
+        "x": 850,
+        "y": 330,
+        "created": "2026-09-03T17:05:05.263Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-03T17:05:05.263Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null,
+        "kind": "region",
+        "region": {
+          "x": 0.05,
+          "y": 0.86,
+          "w": 0.6,
+          "h": 0.09
+        }
+      }
     ]
-   },
-   {
-    "id": "A-0003",
-    "quote": "92 个词条",
-    "prefix": "",
-    "suffix": "",
-    "body": "关键词表引用来源缺失，需要补一条脚注。",
-    "x": 850,
-    "y": 700,
-    "created": "2026-09-03T15:44:29.649Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:44:29.649Z"
-     }
-    ],
-    "supersedes": [],
-    "offsets": {
-     "start": 492,
-     "end": 499
-    }
-   },
-   {
-    "id": "A-0004",
-    "quote": "标准误在门店层面聚类调整",
-    "prefix": "",
-    "suffix": "",
-    "body": "聚类层级是否应提到行业×年份？待定，但不要再改回普通标准误。",
-    "x": 850,
-    "y": 1520,
-    "created": "2026-09-03T15:44:29.661Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:44:29.661Z"
-     }
-    ],
-    "supersedes": [],
-    "offsets": {
-     "start": 773,
-     "end": 785
-    }
-   },
-   {
-    "id": "A-0005",
-    "quote": "外卖业务板块的净利润为46%，远高于门店整体水平",
-    "prefix": "",
-    "suffix": "",
-    "body": "这条口径我改主意了：整体口径必须含税，含税口径下这块业务的利润率要重新算。",
-    "x": 850,
-    "y": 1240,
-    "created": "2026-09-03T15:58:06.042Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:58:06.045Z"
-     },
-     {
-      "event": "supersedes_A-0001",
-      "at": "2026-09-03T15:58:06.128Z"
-     }
-    ],
-    "supersedes": [
-     "A-0001"
-    ],
-    "conflicts_with": [],
-    "offsets": {
-     "start": 928,
-     "end": 945
-    }
-   },
-   {
-    "id": "A-0006",
-    "quote": "3,842 个门店—季度观测值",
-    "prefix": "",
-    "suffix": "",
-    "body": "样本量我需要再核对一遍，先别在正文引用这个数。",
-    "x": 888.876,
-    "y": 94.6807,
-    "created": "2026-09-03T15:59:57.512Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T15:59:57.512Z"
-     },
-     {
-      "event": "conflict_with_A-0002",
-      "at": "2026-09-03T15:59:57.521Z"
-     },
-     {
-      "event": "moved",
-      "at": "2026-09-03T16:34:07.716Z"
-     },
-     {
-      "event": "moved",
-      "at": "2026-09-03T16:34:16.132Z"
-     },
-     {
-      "event": "moved",
-      "at": "2026-09-03T16:34:18.412Z"
-     }
-    ],
-    "supersedes": [],
-    "conflicts_with": [
-     "A-0002"
-    ],
-    "offsets": {
-     "start": 267,
-     "end": 283
-    }
-   },
-   {
-    "id": "A-0007",
-    "kind": "region",
-    "quote": "图片 配图-数字化与坪效.png 区域 (0.04, 0.08)",
-    "prefix": "",
-    "suffix": "",
-    "body": "图 3-1 的 Y 轴刻度标签糊了，让 Agent 重出一版矢量图，字体统一用正文衬线体",
-    "x": 850,
-    "y": 0,
-    "region": {
-     "x": 0.04,
-     "y": 0.08,
-     "w": 0.08,
-     "h": 0.78
-    },
-    "image": "配图-数字化与坪效.png",
-    "created": "2026-09-04T00:32:13.439Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-04T00:32:13.439Z"
-     }
-    ],
-    "supersedes": [],
-    "conflicts_with": [],
-    "offsets": null
-   }
-  ],
-  "配图-数字化与坪效.png": [
-   {
-    "id": "A-0001",
-    "quote": "区域 (0.72, 0.10)",
-    "prefix": "",
-    "suffix": "",
-    "body": "Q7 这组柱子颜色太重，降一档饱和度",
-    "x": 850,
-    "y": 120,
-    "created": "2026-09-03T17:05:05.210Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T17:05:05.210Z"
-     }
-    ],
-    "supersedes": [],
-    "conflicts_with": [],
-    "offsets": null,
-    "kind": "region",
-    "region": {
-     "x": 0.72,
-     "y": 0.1,
-     "w": 0.16,
-     "h": 0.72
-    }
-   },
-   {
-    "id": "A-0002",
-    "quote": "区域 (0.05, 0.86)",
-    "prefix": "",
-    "suffix": "",
-    "body": "注的文字太小，正文里至少要 10pt",
-    "x": 850,
-    "y": 330,
-    "created": "2026-09-03T17:05:05.263Z",
-    "status": "active",
-    "weight": 1,
-    "history": [
-     {
-      "event": "created",
-      "at": "2026-09-03T17:05:05.263Z"
-     }
-    ],
-    "supersedes": [],
-    "conflicts_with": [],
-    "offsets": null,
-    "kind": "region",
-    "region": {
-     "x": 0.05,
-     "y": 0.86,
-     "w": 0.6,
-     "h": 0.09
-    }
-   }
-  ]
- },
- "arrows": [
-  {
-   "id": "AR-0001",
-   "x1": 100,
-   "y1": 100,
-   "x2": 300,
-   "y2": 180,
-   "bend": 25.84879107424562,
-   "color": "orange",
-   "label": "这里是重点",
-   "created": "2026-09-04T01:33:05.460Z",
-   "doc": "配图-数字化与坪效.png"
   },
-  {
-   "id": "AR-0002",
-   "x1": 51.09489051094891,
-   "y1": 662.1897810218978,
-   "x2": 224.8175182481752,
-   "y2": 560,
-   "bend": 24.185970300124758,
-   "color": "red",
-   "label": "这张图的口径不对",
-   "created": "2026-09-04T01:34:50.189Z",
-   "doc": "配图-数字化与坪效.png"
-  }
- ],
- "notes": [
-  {
-   "id": "N-0003",
-   "x": 293.3211678832117,
-   "y": 601.3138686131387,
-   "text": "记得补一版矢量重绘，Q3 柱子单独说",
-   "created": "2026-09-04T01:34:51.316Z",
-   "doc": "配图-数字化与坪效.png"
-  }
- ],
- "images": [
-  {
-   "id": "IMG-0001",
-   "file": ".marginalia/assets/重绘版-数字化与坪效-v2.png",
-   "x": 760,
-   "y": 470,
-   "w": 300,
-   "doc": "配图-数字化与坪效.png",
-   "created": "2026-09-04T02:44:16.388Z"
-  }
- ],
- "drafts": [],
- "demo": true,
- "note": "示例 vault：所有文档与数据均为虚构，仅用于演示 CoEditor。"
+  "arrows": [
+    {
+      "id": "AR-0001",
+      "x1": 100,
+      "y1": 100,
+      "x2": 300,
+      "y2": 180,
+      "bend": 25.84879107424562,
+      "color": "orange",
+      "label": "这里是重点",
+      "created": "2026-09-04T01:33:05.460Z",
+      "doc": "配图-数字化与坪效.png"
+    },
+    {
+      "id": "AR-0002",
+      "x1": 51.09489051094891,
+      "y1": 662.1897810218978,
+      "x2": 224.8175182481752,
+      "y2": 560,
+      "bend": 24.185970300124758,
+      "color": "red",
+      "label": "这张图的口径不对",
+      "created": "2026-09-04T01:34:50.189Z",
+      "doc": "配图-数字化与坪效.png"
+    }
+  ],
+  "notes": [
+    {
+      "id": "N-0003",
+      "x": 293.3211678832117,
+      "y": 601.3138686131387,
+      "text": "记得补一版矢量重绘，Q3 柱子单独说",
+      "created": "2026-09-04T01:34:51.316Z",
+      "doc": "配图-数字化与坪效.png"
+    }
+  ],
+  "images": [
+    {
+      "id": "IMG-0001",
+      "file": ".marginalia/assets/重绘版-数字化与坪效-v2.png",
+      "x": 760,
+      "y": 470,
+      "w": 300,
+      "doc": "配图-数字化与坪效.png",
+      "created": "2026-09-04T02:44:16.388Z"
+    }
+  ],
+  "drafts": [],
+  "demo": true,
+  "note": "示例 vault：所有文档与数据均为虚构，仅用于演示 CoEditor。",
+  "activeRound": 1,
+  "roundHistory": [
+    {
+      "round": 0,
+      "closedAt": "2026-09-04T04:47:34.944Z"
+    }
+  ]
 }

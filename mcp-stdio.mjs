@@ -178,15 +178,17 @@ async function loadSidecar() {
       if (!Array.isArray(data[key])) data[key] = [];
     }
     return data;
-  } catch {
-    return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
+  } catch (err) {
+    // ENOENT = 首次使用给空结构；文件存在但读不了 = 拒绝服务（防止空壳覆盖真实数据）
+    if (err && err.code === "ENOENT") return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
+    throw new Error(`sidecar-unreadable: ${String(err && err.message || err)}`);
   }
 }
 
 async function saveSidecar(data) {
   const { writeFile, mkdir, rename, readFile } = await import("node:fs/promises");
-  /* 防破坏守卫（与 server 同款）：任何集合数量无故减少即拒绝写盘，
-     防止异常空壳（如 read 失败的 catch 兜底值）覆盖真实数据 */
+  /* 防破坏守卫（与 server 同款）：任何集合数量无故减少即拒绝写盘。
+     磁盘存在但读不了时同样拒绝写——宁可失败，绝不拿空/半读数据覆盖事实源 */
   try {
     const current = JSON.parse(await readFile(SIDECAR, "utf8"));
     for (const key of ["arrows", "notes", "images", "drafts"]) {
@@ -196,10 +198,11 @@ async function saveSidecar(data) {
     }
     const beforeDocs = Object.values(current.docs || {}).reduce((acc, l) => acc + (Array.isArray(l) ? l.length : 0), 0);
     const afterDocs = Object.values(data.docs || {}).reduce((acc, l) => acc + (Array.isArray(l) ? l.length : 0), 0);
-    if (beforeDocs > 0 && afterDocs < beforeDocs) throw new Error(`blocked-destructive-annotation-loss: ${beforeDocs} -> ${afterDocs}`);
+    if (beforeDocs > afterDocs) throw new Error(`blocked-destructive-annotation-loss: ${beforeDocs} -> ${afterDocs}`);
   } catch (error) {
     if (String(error).startsWith("Error: blocked-destructive")) throw error;
-    /* 磁盘无文件或损坏：首次写盘，放行 */
+    if (error && error.code !== "ENOENT") throw new Error(`sidecar-unreadable-refusing-write: ${String(error)}`);
+    /* 磁盘无文件：首次写盘，放行 */
   }
   await mkdir(dirname(SIDECAR), { recursive: true });
   // 随机 tmp 后缀：并发请求同进程写盘时避免 rename 竞态

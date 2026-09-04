@@ -223,6 +223,7 @@ async function anchorAll() {
   document.querySelectorAll(".anchor").forEach((node) => {
     const item = state.annotations.find((entry) => entry.id === node.dataset.ann);
     node.dataset.status = item ? item.status : "active";
+    node.dataset.kind = item && (item.kind === "highlight" || item.kind === "strike") ? item.kind : "comment";
   });
   return decayed;
 }
@@ -246,16 +247,21 @@ function cardElement(annotation) {
     const other = state.annotations.find((entry) => entry.id === otherId);
     return other && other.status === "active";
   });
+  const KIND_BADGE = { highlight: '<span class="c-kind hl">高亮</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
+  const roundNo = Number.isFinite(annotation.round) ? annotation.round : 0;
+  const isCurrentRound = roundNo === (state.round ?? 0);
   card.innerHTML = `
     <div class="c-head">
       <span class="c-id">${annotation.id}</span>
+      <span class="c-round${isCurrentRound ? " cur" : ""}" title="批次：同一轮迭代里写的批注">R${roundNo}</span>
+      ${KIND_BADGE[annotation.kind] || ""}
       <span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
       ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.join("/")}</span>` : ""}
       <span class="c-weight" title="权重 ${Number(annotation.weight ?? 1).toFixed(2)}">${weightDots(annotation.weight)}</span>
     </div>
-    <div class="c-body">${escapeHtml(annotation.body || "")}</div>
+    <div class="c-body">${escapeHtml(annotation.body || (annotation.kind === "highlight" ? "（高亮标记 · 提醒 Agent 此处重要）" : annotation.kind === "strike" ? "（删除线标记 · 建议删除此段）" : ""))}</div>
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
     <div class="c-actions">
       <button data-act="addressed">已处理</button>
@@ -906,13 +912,14 @@ function renderNotes() {
 
 function noteElement(note) {
   const node = document.createElement("div");
-  node.className = "note";
+  node.className = note.type === "board" ? "note board" : "note";
   node.dataset.id = note.id;
   node.contentEditable = "false";
-  node.dataset.placeholder = "写点想法…";
+  node.dataset.placeholder = note.type === "board" ? "白板 · 随手写想法（不计入 Agent 约束）…" : "写点想法…";
   node.textContent = note.text || "";
   node.style.left = `${note.x}px`;
   node.style.top = `${note.y}px`;
+  if (note.type === "board" && !note.w) { node.style.width = "440px"; node.style.minHeight = "300px"; }
   if (state.canvasSelected && state.canvasSelected.type === "note" && state.canvasSelected.id === note.id) {
     node.classList.add("selected");
   }
@@ -1169,6 +1176,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "a" || event.key === "A") setTool("arrow");
   if (event.key === "n" || event.key === "N") setTool("note");
   if (event.key === "i" || event.key === "I") $("file-input").click();
+  if (event.key === "w" || event.key === "W") setTool("board");
   if (event.key === "Escape") { selectCanvas(null); setTool("select"); }
   if (event.key === "?" || (event.shiftKey && event.key === "/")) {
     const help = $("shortcut-help");
@@ -1219,7 +1227,7 @@ function tidyLayout() {
     patch(annotation.id, { x: annotation.x, y: annotation.y, event: "layout" });
   }
   renderCards();
-  applyTransform();
+  initialView(); // 回到默认查阅视图：文档顶部 + 卡片一列入镜
   toast("已整理布局");
 }
 
@@ -1271,6 +1279,7 @@ async function waitForPdfRenderer(timeout = 6000) {
 }
 
 async function renderDocument() {
+  if (editSession) return; // 编辑态不重渲染，外部修改由保存时 409 提示
   const host = $("doc");
   if (state.mode === "pdf") {
     if (!(await waitForPdfRenderer())) {
@@ -1301,9 +1310,13 @@ async function renderDocument() {
 
 async function loadAnnotations() {
   if (!state.path) return;
-  const res = await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`);
+  const [res, roundRes] = await Promise.all([
+    fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`),
+    fetch("/api/rounds"),
+  ]);
   const data = await res.json();
   state.annotations = data.annotations || [];
+  if (roundRes.ok) state.round = (await roundRes.json()).activeRound ?? 0;
   await renderDocument();
   const decayed = state.mode === "image" ? 0 : await anchorAll();
   renderRegions();
@@ -1385,10 +1398,22 @@ async function loadTree() {
 /* ---------------- 选区批注 ---------------- */
 let pending = null;
 
+/* 选区动作菜单：批注 / 高亮 / 删除线（参考 Obsidian Selection Toolbar 的交互） */
+function showSelMenu(rect) {
+  const menu = $("sel-menu");
+  menu.hidden = false;
+  const top = Math.max(8, rect.top - 44);
+  menu.style.top = `${top}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+}
+function hideSelMenu() { $("sel-menu").hidden = true; }
+
 $("page").addEventListener("mouseup", (event) => {
+  if (state.mode === "image" || state.mode === "pdf") return;
+  if (document.body.classList.contains("editing-doc")) return; // 编辑态由 textarea 自己处理
   const selection = window.getSelection();
   const text = String(selection).trim();
-  if (!text || !$("doc").contains(selection.anchorNode)) return;
+  if (!text || !$("doc").contains(selection.anchorNode)) { hideSelMenu(); return; }
   const range = selection.getRangeAt(0);
   const container = $("doc");
   const before = document.createRange();
@@ -1403,15 +1428,48 @@ $("page").addEventListener("mouseup", (event) => {
     suffix: String(after).slice(0, 40),
     worldY: worldRect(range).y,
   };
-  const rect = range.getBoundingClientRect();
+  showSelMenu(range.getBoundingClientRect());
+  event.stopPropagation();
+});
+
+document.addEventListener("mousedown", (event) => {
+  const menu = $("sel-menu");
+  if (!menu.hidden && !menu.contains(event.target)) hideSelMenu();
+});
+
+$("sel-menu").addEventListener("mousedown", (event) => event.stopPropagation());
+$("sel-menu").addEventListener("click", async (event) => {
+  const action = event.target.dataset && event.target.dataset.selAct;
+  if (!action || !pending) return;
+  hideSelMenu();
+  if (action === "comment") { openComposer(); return; }
+  const kind = action === "highlight" ? "highlight" : "strike";
+  const y = freeSpotNear(pending.worldY);
+  await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind, quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
+      body: "", x: RAIL_X, y, round: state.round ?? 0,
+    }),
+  });
+  const quote = pending.quote;
+  pending = null;
+  window.getSelection().removeAllRanges();
+  await loadAnnotations();
+  toast(kind === "highlight" ? `已高亮「${quote.slice(0, 18)}…」` : `已标记删除线「${quote.slice(0, 18)}…」`);
+});
+
+function openComposer() {
+  if (!pending) return;
   const composer = $("composer");
+  const rect = window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).getBoundingClientRect() : { bottom: 200, left: 200 };
   composer.hidden = false;
   composer.style.top = `${Math.min(rect.bottom + 10, window.innerHeight - 220)}px`;
   composer.style.left = `${Math.min(rect.left, window.innerWidth - 360)}px`;
-  $("composer-quote").textContent = `“${text.slice(0, 90)}”`;
+  $("composer-quote").textContent = `“${pending.quote.slice(0, 90)}”`;
   $("composer-input").focus();
-  event.stopPropagation();
-});
+}
 
 $("composer-cancel").addEventListener("click", closeComposer);
 
@@ -1440,6 +1498,7 @@ async function saveAnnotation() {
       kind: pending.kind || "text-quote",
       region: pending.region || null,
       image: pending.image || null,
+      round: state.round ?? 0,
     }),
   });
   closeComposer();
@@ -1453,11 +1512,81 @@ $("composer-input").addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeComposer();
 });
 
+/* ---------------- Markdown 编辑模式（阅读 ⇄ 编辑，双击切换，参考 VSCode） ---------------- */
+let editSession = null; // { textarea, bar, baseMtime }
+
+$("page").addEventListener("dblclick", (event) => {
+  if (state.mode !== "text" || /\.html?$/i.test(state.path || "")) return;
+  if (document.body.classList.contains("editing-doc")) return;
+  if (event.target.closest(".card") || event.target.closest("figure")) return;
+  enterEditMode();
+});
+
+function enterEditMode() {
+  if (editSession) return;
+  const doc = $("doc");
+  const textarea = document.createElement("textarea");
+  textarea.id = "md-editor";
+  textarea.value = state.text;
+  textarea.spellcheck = false;
+  doc.innerHTML = "";
+  doc.appendChild(textarea);
+  document.body.classList.add("editing-doc");
+  hideSelMenu();
+  const bar = document.createElement("div");
+  bar.id = "edit-bar";
+  bar.innerHTML = `
+    <span class="eb-hint">编辑模式 · Markdown 源码 · 保存后批注自动重新锚定</span>
+    <button id="edit-save" class="primary">保存 ⌘S</button>
+    <button id="edit-cancel" class="ghost">完成</button>`;
+  $("page").prepend(bar);
+  editSession = { textarea, baseMtime: state.mtime };
+  textarea.addEventListener("keydown", (event) => {
+    event.stopPropagation(); // 不触发画布快捷键
+    if ((event.metaKey || event.ctrlKey) && event.key === "s") { event.preventDefault(); saveEdit(); }
+  });
+  $("edit-save").addEventListener("click", saveEdit);
+  $("edit-cancel").addEventListener("click", exitEditMode);
+  textarea.focus();
+}
+
+async function saveEdit() {
+  if (!editSession) return;
+  const res = await fetch(`/api/write?p=${encodeURIComponent(state.path)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: editSession.textarea.value, baseMtime: editSession.baseMtime }),
+  });
+  if (res.status === 409) {
+    toast("文件已被外部修改，请先「完成」退出后重新进入编辑");
+    const fresh = await (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json();
+    editSession.baseMtime = fresh.mtime;
+    return;
+  }
+  if (!res.ok) { toast("保存失败： " + (await res.json().catch(() => ({}))).error); return; }
+  const data = await res.json();
+  state.mtime = data.mtime;
+  state.text = editSession.textarea.value; // 同步内存文本，loadAnnotations 重渲染才用新内容
+  toast("已保存，批注正在重新锚定");
+  exitEditMode();
+  await loadAnnotations();
+}
+
+function exitEditMode() {
+  if (!editSession) return;
+  editSession = null;
+  document.body.classList.remove("editing-doc");
+  const bar = $("edit-bar");
+  if (bar) bar.remove();
+  loadAnnotations(); // 重渲染 + 重锚定
+}
+
 /* ---------------- 画布交互 ---------------- */
 $("viewport").addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
   if (event.target.closest(".card") || event.target.closest("#page") || event.target.closest("#composer") || event.target.closest(".note") || event.target.closest(".arrow-g")) return;
   if (state.canvasTool === "arrow") { startArrowDraft(event); return; }
+  if (state.canvasTool === "board") { placeBoard(event); setTool("select"); return; }
   if (state.canvasTool === "note") { placeNote(event); return; }
   if (state.canvasTool === "image") { $("file-input").click(); return; }
   if (!event.target.closest("#toolbox")) selectCanvas(null);
@@ -1523,39 +1652,72 @@ $("rail-toggle").addEventListener("click", () => {
 
 /* ---------------- 约束清单抽屉 ---------------- */
 function constraintsText() {
-  const active = state.annotations
-    .filter((item) => item.status === "active")
-    .sort((a, b) => b.weight - a.weight);
+  const round = state.round ?? 0;
+  const roundOf = (item) => Number.isFinite(item.round) ? item.round : 0;
+  const active = state.annotations.filter((item) => item.status === "active");
+  const current = active.filter((item) => roundOf(item) === round).sort((a, b) => b.weight - a.weight);
+  const older = active.filter((item) => roundOf(item) !== round).sort((a, b) => roundOf(b) - roundOf(a) || b.weight - a.weight);
   // 手绘箭头标签与便签同样是人类意图，纳入约束清单
   const canvasArrows = state.arrows.filter((item) => ownsCanvas(item) && (item.label || "").trim());
-  const canvasNotes = state.notes.filter((item) => ownsCanvas(item) && (item.text || "").trim());
-  const total = active.length + canvasArrows.length + canvasNotes.length;
-  const lines = [
-    `# ${state.path} · 修改前必读的人类约束（${total} 条）`,
-    "",
-    ...active.flatMap((item) => [
+  const canvasNotes = state.notes.filter((item) => ownsCanvas(item) && (item.text || "").trim() && item.type !== "board");
+  const KIND_LINE = {
+    highlight: (item) => `- [${item.id}·高亮]「${item.quote.slice(0, 60)}」\n  （人标记了重点，修改时保留并优先呼应此处）`,
+    strike: (item) => `- [${item.id}·删除线]「${item.quote.slice(0, 60)}」\n  （人标记删除线：建议删除或重写此段）`,
+  };
+  const annLine = (item) => {
+    if (KIND_LINE[item.kind]) return KIND_LINE[item.kind](item);
+    return [
       `- [${item.id}] w=${Number(item.weight ?? 1).toFixed(2)} 「${item.quote.slice(0, 60)}」`,
       `  ${item.body}`,
       ...(item.conflicts_with || []).length ? [`  ⚠ 与 ${item.conflicts_with.join("/")} 冲突，未经裁定前先询问用户`] : [],
-    ]),
-    ...canvasArrows.map((item) => [`- [${item.id}·箭头]「${item.label.trim()}」`, "  （人在画布上手写的视觉指令）"]).flat(),
-    ...canvasNotes.map((item) => [`- [${item.id}·便签] ${item.text.trim()}`]).flat(),
+    ];
+  };
+  const lines = [
+    `# ${state.path} · 修改前必读的人类约束`,
+    "",
+    `## 批次 ${round}（当前进行中）· ${current.length} 条`,
+    "",
+    ...current.flatMap(annLine),
   ];
+  if (older.length) {
+    lines.push("", `## 历史批次（仍然生效的旧约束，通常已被处理过，仅供参照）· ${older.length} 条`, "");
+    lines.push(...older.flatMap(annLine));
+  }
+  if (canvasArrows.length || canvasNotes.length) {
+    lines.push("", `## 画布手写（同属人类意图）`, "");
+    lines.push(...canvasArrows.map((item) => `- [${item.id}·箭头]「${item.label.trim()}」\n  （人在画布上手写的视觉指令）`).flat());
+    lines.push(...canvasNotes.map((item) => `- [${item.id}·便签] ${item.text.trim()}`).flat());
+  }
   return lines.join("\n");
 }
 
 function renderDrawer() {
-  const active = state.annotations.filter((item) => item.status === "active");
-  $("drawer-body").innerHTML = active.length ? active
-    .slice()
-    .sort((a, b) => b.weight - a.weight)
-    .map((item) => `
-      <div class="d-item">
-        <div class="d-item-head"><span class="c-id">${item.id}</span><span class="c-weight">${weightDots(item.weight)}</span></div>
-        <div class="d-item-body">${escapeHtml(item.body)}</div>
-        <div class="d-item-quote">「${escapeHtml(item.quote.slice(0, 50))}」</div>
-      </div>`)
-    .join("") : '<div class="d-empty">当前没有生效批注</div>';
+  const round = state.round ?? 0;
+  const roundOf = (item) => Number.isFinite(item.round) ? item.round : 0;
+  const all = state.annotations.slice().sort((a, b) => roundOf(b) - roundOf(a) || (b.weight - a.weight));
+  const groups = new Map();
+  for (const item of all) {
+    const r = roundOf(item);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(item);
+  }
+  const itemHtml = (item) => `
+    <div class="d-item" data-status="${item.status}">
+      <div class="d-item-head">
+        <span class="c-id">${item.id}</span>
+        ${item.kind === "highlight" ? '<span class="c-kind hl">高亮</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
+        <span class="c-badge">${LABELS[item.status] || item.status}</span>
+        <span class="c-weight">${weightDots(item.weight)}</span>
+      </div>
+      ${item.body ? `<div class="d-item-body">${escapeHtml(item.body)}</div>` : ""}
+      <div class="d-item-quote">「${escapeHtml(item.quote.slice(0, 50))}」</div>
+    </div>`;
+  let html = "";
+  for (const [r, items] of groups) {
+    html += `<div class="d-round">${r === round ? `批次 ${r} · 进行中` : `批次 ${r} · 历史`}</div>`;
+    html += items.map(itemHtml).join("");
+  }
+  $("drawer-body").innerHTML = html || '<div class="d-empty">还没有批注 —— 选中文字开始第一条</div>';
 }
 
 $("btn-export").addEventListener("click", () => exportAnnotatedImage());
@@ -1583,7 +1745,52 @@ function toast(message) {
   toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
 }
 
-/* ---------------- 外部修改感知 ---------------- */
+/* ---------------- 批次：锁定一轮批注，交给 Agent 后自动推进 ---------------- */
+$("btn-round").addEventListener("click", async () => {
+  const res = await fetch("/api/rounds", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "save" }),
+  });
+  if (!res.ok) return toast("保存批次失败");
+  const data = await res.json();
+  await loadAnnotations();
+  renderDrawer();
+  toast(`批次 ${data.closed} 已交付归档，新批注将属于批次 ${data.activeRound}`);
+});
+
+/* ---------------- 白板：画布上的一块可写大白板（想法草稿区，不入约束） ---------------- */
+async function placeBoard(event) {
+  const p = toWorld(event.clientX, event.clientY);
+  const created = await canvasApi("/api/canvas/notes", {
+    method: "POST",
+    body: JSON.stringify({ x: p.x - 210, y: p.y - 150, text: "", type: "board", doc: state.path }),
+  });
+  state.notes.push(created.note);
+  renderNotes();
+  toast("白板已放置 · 双击写入（白板是草稿区，不计入 Agent 约束）");
+}
+
+/* ---------------- 左栏：像 VSCode 一样打开本地文件夹 ---------------- */
+$("btn-vault").addEventListener("click", async () => {
+  const next = prompt("输入要打开的本地文件夹的绝对路径：", $("vault").textContent || "");
+  if (!next || !next.trim()) return;
+  const res = await fetch("/api/vault", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: next.trim() }),
+  });
+  if (!res.ok) { toast("打开失败：目录不存在或不可访问"); return; }
+  const data = await res.json();
+  state.path = null;
+  state.annotations = [];
+  $("empty").style.display = "";
+  $("docpath").textContent = "未选择文档";
+  await loadTree();
+  toast(`已切换到 ${data.root}`);
+});
+
+/* ---------------- 外部修改感知：Agent 改完文档 = 本轮结束，自动推进批次 ---------------- */
 setInterval(async () => {
   if (!state.path) return;
   const res = await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`);
@@ -1592,7 +1799,19 @@ setInterval(async () => {
   if (data.mtime === state.mtime) return;
   state.text = data.text;
   state.mtime = data.mtime;
-  toast("文档被外部修改，批注正在重新锚定");
+  try {
+    const r = await fetch("/api/rounds", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "save" }),
+    });
+    if (r.ok) {
+      const rd = await r.json();
+      toast(`检测到 Agent 已修改文档 · 批次 ${rd.closed} 归档，新批注属于批次 ${rd.activeRound}`);
+    }
+  } catch {
+    toast("文档被外部修改，批注正在重新锚定");
+  }
   await loadAnnotations();
 }, 4000);
 
