@@ -1692,6 +1692,10 @@ function buildHtmlCoedit(source) {
   return { html: `<!doctype html>${preview.documentElement.outerHTML}`, original, map };
 }
 
+function htmlPreviewOnly(source) {
+  return buildHtmlCoedit(source).html;
+}
+
 /* 点击元素直接改文字：双击纯文本元素 → 浮动编辑面板 → 保存映射回 original 树写回源文件 */
 let htmlEditTarget = null;
 
@@ -1910,19 +1914,49 @@ function enterEditMode() {
   $("page").prepend(bar);
   $("edit-save").addEventListener("click", saveEdit);
   $("edit-cancel").addEventListener("click", () => setWorkspaceMode("read"));
-  const cm = CodeMirror(holder, {
+  let previewFrame = null;
+  let previewTimer = null;
+  const isHtmlEdit = /\.html?$/i.test(state.path || "");
+  if (isHtmlEdit) {
+    const split = document.createElement("div");
+    split.className = "edit-split";
+    const cmPane = document.createElement("div");
+    cmPane.className = "cm-pane";
+    const previewPane = document.createElement("div");
+    previewPane.className = "preview-pane";
+    previewFrame = document.createElement("iframe");
+    previewFrame.className = "edit-preview";
+    previewFrame.sandbox = "allow-same-origin";
+    previewPane.appendChild(previewFrame);
+    split.appendChild(cmPane);
+    split.appendChild(previewPane);
+    holder.appendChild(split);
+    holder.classList.add("splitting");
+  }
+  const cm = CodeMirror(isHtmlEdit ? holder.querySelector(".cm-pane") : holder, {
     value: state.text,
     mode: /\.(html?|json)$/i.test(state.path || "") ? (/\.html?$/i.test(state.path || "") ? "htmlmixed" : { name: "javascript", json: true }) : "markdown",
     lineNumbers: true,
     lineWrapping: true,
     styleActiveLine: true,
     viewportMargin: 10,
-    extraKeys: { "Cmd-S": saveEdit, "Ctrl-S": saveEdit },
+    extraKeys: {
+      "Cmd-S": saveEdit, "Ctrl-S": saveEdit,
+      "Cmd-F": "findPersistent", "Ctrl-F": "findPersistent",
+    },
   });
   cm.focus();
   // 容器刚重建时布局未稳定，CM 需要手动 refresh 才会绘制内容
   cm.refresh();
   setTimeout(() => cm.refresh(), 80);
+  if (isHtmlEdit && previewFrame) {
+    const renderPreview = () => { previewFrame.srcdoc = htmlPreviewOnly(cm.getValue()); };
+    renderPreview();
+    cm.on("change", () => {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(renderPreview, 500);
+    });
+  }
   editSession = { cm, baseMtime: state.mtime };
 }
 

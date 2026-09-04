@@ -278,6 +278,63 @@
           "start": 539,
           "end": 545
         }
+      },
+      {
+        "id": "A-0010",
+        "kind": "strike",
+        "round": 5,
+        "quote": "图片 配图-数字化与坪效.png 区域 (0.16, -0.37)",
+        "prefix": "",
+        "suffix": "",
+        "body": "",
+        "x": 850,
+        "y": 2694,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T09:15:44.522Z",
+        "status": "stale",
+        "weight": 0.5,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T09:15:44.522Z"
+          },
+          {
+            "event": "anchor_lost",
+            "at": "2026-09-04T09:15:44.599Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      },
+      {
+        "id": "A-0011",
+        "kind": "strike",
+        "round": 5,
+        "quote": "数字化程度与坪效的季度分布如下图所示，两者在样本期内均呈右偏分布，且 2024 年后右尾明显拉长。",
+        "prefix": "稳健性检验共同支撑后续因果推断的可信度。\n\n3.7 数字化与坪效的季度分布\n门店",
+        "suffix": "\nA-0007数字化程度与坪效季度分布\n图 3-1 注：柱为数字化指数中位数，折",
+        "body": "",
+        "x": 850,
+        "y": 2808,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T09:15:47.431Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T09:15:47.431Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": {
+          "start": 1379,
+          "end": 1428
+        }
       }
     ],
     "配图-数字化与坪效.png": [

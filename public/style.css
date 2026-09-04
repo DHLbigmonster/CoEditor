@@ -1002,3 +1002,19 @@ body.round-only .card[data-round-cur="0"]:hover { opacity: .85; }
 #html-edit textarea:focus { outline: none; box-shadow: 0 0 0 2px rgba(238, 107, 80, .35); }
 /* iframe 内可编辑元素 hover 提示（仅阅读模式） */
 body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5px dashed rgba(238, 107, 80, .45); outline-offset: 2px; }
+
+/* ================= v0.7.4 · 编辑器搜索 + HTML 实时预览分屏 ================= */
+.edit-split { display: flex; gap: 14px; align-items: stretch; }
+.edit-split .cm-pane { flex: 1 1 52%; min-width: 0; }
+.edit-split .preview-pane { flex: 1 1 48%; min-width: 0; }
+#md-editor .edit-split .CodeMirror { height: calc(100vh - 224px); }
+.edit-preview {
+  width: 100%; height: calc(100vh - 224px);
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+}
+.CodeMirror-dialog {
+  background: var(--panel-2, #fff); color: var(--ink, #2d2923);
+  border-bottom: 1px solid var(--line); font-size: 12.5px;
+}
+.CodeMirror-dialog input { border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: #fff; color: var(--ink); }
+.CodeMirror-dialog button { color: var(--ink); }
