@@ -3,12 +3,12 @@
 //       → 等 2 个轮询周期 → 断言：① 旧标签页视图被重置（未误读新目录同名文件）② 副本 activeRound 未被推进
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 
-const COPY = "/tmp/coeditor-e2e-vault";
-const roundBefore = await (await fetch("http://127.0.0.1:4400/api/rounds")).json();
+const COPY = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-e2e-vault";
+const roundBefore = await (await fetch("http://127.0.0.1:4401/api/rounds")).json();
 
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4400"));
-if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4400", { method: "PUT" })).json(); }
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4401"));
+if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json(); }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pending = new Map();
 const send = (method, params = {}) => new Promise((res, rej) => {
@@ -28,18 +28,18 @@ const evalv = async (expr) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 1) 切到副本 vault，打开 md（标签页 state.vaultRoot = 副本）
-await fetch("http://127.0.0.1:4400/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: COPY }) });
-await send("Page.navigate", { url: "http://127.0.0.1:4400/?doc=" + encodeURIComponent("研究设计笔记.md") });
+await fetch("http://127.0.0.1:4401/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: COPY }) });
+await send("Page.navigate", { url: "http://127.0.0.1:4401/?doc=" + encodeURIComponent("研究设计笔记.md") });
 await sleep(2500);
 const before = await evalv(`({ path: state ? undefined : undefined, vaultRoot: (window.state||{}).vaultRoot || "n/a", doc: !!document.getElementById("doc").innerHTML.length })`);
 
 // 2) 服务端切走 vault（模拟另一个标签页里选了别的文件夹）
-await fetch("http://127.0.0.1:4400/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/Users/chaos/WorkBuddy/2026-09-03-22-03-32/marginalia/sample" }) });
+await fetch("http://127.0.0.1:4401/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/Users/chaos/WorkBuddy/2026-09-03-22-03-32/backups/coeditor-desktop-before-m7-1558/sample" }) });
 
 // 3) 等 2 个轮询周期（4s interval）
 await sleep(9500);
 const after = await evalv(`({ emptyShown: document.getElementById("empty").style.display !== "none", docEmpty: !document.getElementById("doc").innerHTML.length, treeCleared: !document.querySelectorAll("#tree .file").length })`);
-const roundAfter = await (await fetch("http://127.0.0.1:4400/api/rounds")).json();
+const roundAfter = await (await fetch("http://127.0.0.1:4401/api/rounds")).json();
 
 console.log("GUARD:" + JSON.stringify({
   before,

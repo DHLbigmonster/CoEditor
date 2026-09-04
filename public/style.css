@@ -754,3 +754,208 @@ body.paper-dark .note.board { background: linear-gradient(180deg, #2c2822, #241f
 .fs-foot .primary { background: var(--accent, #de614f); color: #fff; }
 .fs-foot .ghost { background: rgba(236, 231, 221, .07); color: var(--ink-dim); }
 .fs-foot button:disabled { opacity: .4; cursor: default; }
+
+/* ================= v0.7 · 阅读 / 编辑 / 画布三态与暖白界面 ================= */
+:root {
+  --rail-width: 280px;
+  --canvas: #f5f2ea;
+  --panel: rgba(250, 248, 242, .96);
+  --panel-2: #ffffff;
+  --panel-3: #eeeae0;
+  --line: rgba(56, 48, 38, .10);
+  --ink: #2d2923;
+  --ink-dim: #6e675d;
+  --ink-faint: #9b9387;
+  --active: #ee6b50;
+  --addressed: #6f9f61;
+  --stale: #c38e35;
+  --deprecated: #8b8780;
+  --paper: #fffefb;
+  --paper-ink: #28241f;
+  --paper-ink-dim: #6d675e;
+  --shadow-soft: 0 10px 28px rgba(62, 51, 36, .10);
+  --shadow-deep: 0 24px 64px rgba(62, 51, 36, .16);
+}
+
+body {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+#rail {
+  width: var(--rail-width);
+  background: var(--panel);
+  box-shadow: inset -1px 0 0 var(--line);
+}
+body.rail-hidden #rail { margin-left: calc(-1 * var(--rail-width)); }
+#rail-resizer {
+  width: 5px; margin-left: -2px; flex: none; z-index: 45;
+  cursor: col-resize; background: transparent; transition: background .12s;
+}
+#rail-resizer:hover, body.resizing-rail #rail-resizer { background: rgba(238, 107, 80, .34); }
+body.rail-hidden #rail-resizer { width: 0; pointer-events: none; }
+body.resizing-rail { cursor: col-resize; user-select: none; }
+
+.tree .file.current { color: var(--ink); background: #e9e4d9; }
+#btn-vault { background: rgba(74, 62, 45, .055); color: var(--ink-dim); }
+#btn-vault:hover { background: #e9e4d9; color: var(--ink); }
+
+#bar {
+  height: 58px;
+  background: rgba(255, 254, 250, .82);
+  box-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(68, 55, 39, .035);
+  backdrop-filter: blur(22px) saturate(1.15);
+}
+.doc-title { color: var(--ink-dim); }
+.chip, .icon, .seg button { white-space: nowrap; }
+.chip:hover, .icon:hover, .chip[data-on="1"] { color: var(--ink); background: #ebe7de; }
+.chip.ask { color: #b44131; background: rgba(238, 107, 80, .12); }
+.chip.ask:hover { color: #993526; background: rgba(238, 107, 80, .20); }
+.divider { background: var(--line); }
+.seg { background: rgba(70, 58, 42, .07); }
+.seg button { color: var(--ink-faint); }
+.seg button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 5px rgba(54, 43, 29, .10); }
+.seg button:disabled { opacity: .36; cursor: not-allowed; }
+.mode-seg button { min-width: 42px; }
+
+.view-menu { position: relative; }
+.view-menu > summary { display: flex; align-items: center; justify-content: center; list-style: none; }
+.view-menu > summary::-webkit-details-marker { display: none; }
+.view-menu-panel {
+  position: fixed; top: 50px; right: 12px; z-index: 80;
+  width: 188px; padding: 7px;
+  background: rgba(255, 254, 250, .97); border: 1px solid var(--line); border-radius: 13px;
+  box-shadow: var(--shadow-deep); backdrop-filter: blur(20px);
+}
+.menu-action {
+  display: block; width: 100%; border: 0; border-radius: 9px; padding: 8px 10px;
+  background: transparent; color: var(--ink-dim); text-align: left; font-size: 12px; cursor: pointer;
+}
+.menu-action:hover { background: #eeeae1; color: var(--ink); }
+.menu-action:disabled { opacity: .36; cursor: not-allowed; }
+
+#viewport { background-color: var(--canvas); }
+
+/* 阅读与编辑是自然文档流：滚轮滚动，文档不会被整页压缩成缩略图。 */
+body:not([data-workspace-mode="canvas"]) #viewport {
+  overflow: auto; cursor: default;
+  background-image: radial-gradient(circle, rgba(85, 70, 49, .035) 1px, transparent 1px);
+  background-size: 28px 28px !important;
+}
+body:not([data-workspace-mode="canvas"]) #world {
+  position: relative; top: auto; left: auto; transform: none;
+  width: 100%; min-height: 100%; padding: 38px 28px 110px;
+}
+body:not([data-workspace-mode="canvas"]) #page {
+  position: relative; top: auto; left: auto;
+  width: min(960px, calc(100% - 12px)); min-height: 420px; margin: 0 auto;
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(65, 52, 35, .12), 0 2px 8px rgba(65, 52, 35, .06);
+}
+body:not([data-workspace-mode="canvas"]) #cards,
+body:not([data-workspace-mode="canvas"]) #lines,
+body:not([data-workspace-mode="canvas"]) #arrows,
+body:not([data-workspace-mode="canvas"]) #images-layer,
+body:not([data-workspace-mode="canvas"]) #drafts-layer,
+body:not([data-workspace-mode="canvas"]) #notes-layer,
+body:not([data-workspace-mode="canvas"]) #toolbox { display: none; }
+body:not([data-workspace-mode="canvas"]) #doc { cursor: text; }
+
+body[data-workspace-mode="canvas"] #viewport {
+  overflow: hidden; cursor: grab;
+  background-image: radial-gradient(circle, rgba(85, 70, 49, .10) 1px, transparent 1px);
+}
+body[data-workspace-mode="canvas"] #page { box-shadow: 0 24px 70px rgba(66, 50, 30, .18); }
+
+#doc.pdf-view { padding: 28px; }
+#doc.image-view { padding: 36px; text-align: center; }
+#doc.html-view { padding: 0; line-height: normal; overflow: visible; }
+#html-frame { display: block; width: 100%; min-height: 720px; border: 0; background: #fff; border-radius: 10px; }
+
+#doc .pdf-page { box-shadow: 0 5px 22px rgba(55, 44, 30, .14); }
+#doc .pdf-page canvas { width: 100%; height: 100%; }
+
+/* 源码编辑占满可用阅读区，不再是缩放后的一小块 textarea。 */
+body[data-workspace-mode="edit"] #world { padding-top: 22px; }
+body[data-workspace-mode="edit"] #page { width: min(1120px, calc(100% - 12px)); min-height: calc(100vh - 106px); }
+body.editing-doc #doc { padding: 0; }
+#edit-bar {
+  background: rgba(255, 254, 250, .96); border-bottom: 1px solid var(--line);
+  border-radius: 10px 10px 0 0; color: var(--ink);
+}
+#edit-bar .ghost { background: #efebe2; color: var(--ink-dim); }
+#md-editor {
+  display: block; min-height: calc(100vh - 166px); padding: 34px 42px 100px;
+  background: #fffefb; color: #29251f; font-size: 14px; line-height: 1.85;
+}
+
+.card, .d-item, #composer, #drawer, .fs-card, .sh-card, #arrow-label-editor { background: rgba(255, 254, 250, .98); color: var(--ink); }
+.card:hover, .card.selected { background: #fff; }
+.c-body { color: var(--ink); }
+.c-weight i { background: rgba(61, 51, 39, .13); }
+.c-actions button { background: rgba(69, 57, 42, .07); color: var(--ink-dim); }
+#composer textarea, .d-export { background: #f3efe7; color: var(--ink); }
+#drawer { box-shadow: -18px 0 52px rgba(60, 47, 31, .16); }
+.d-head { border-bottom-color: var(--line); }
+#toolbox { background: rgba(255, 254, 250, .94); box-shadow: var(--shadow-deep); }
+#toolbox .tool { color: var(--ink-faint); }
+#toolbox .tool:hover { background: #eee9df; color: var(--ink); }
+.tool-sep { background: var(--line); }
+#sel-menu { background: rgba(255, 254, 250, .97); border: 1px solid var(--line); }
+#sel-menu button { color: var(--ink); }
+#sel-menu button:hover { background: #eeeae1; }
+#toast { background: rgba(45, 41, 35, .94); color: #fff; }
+.fs-quick button { color: var(--ink-dim); }
+.fs-foot .ghost { background: #eeeae1; color: var(--ink-dim); }
+
+::-webkit-scrollbar-thumb { background: rgba(65, 54, 41, .16); }
+::-webkit-scrollbar-thumb:hover { background: rgba(65, 54, 41, .26); }
+
+@media (max-width: 1050px) {
+  #bar { padding: 0 10px; }
+  .doc-title { max-width: 110px; font-size: 11.5px; }
+  .bar-tools { max-width: none; overflow: visible; }
+  .bar-tools > .divider, #btn-in, #btn-out, #zoom, #btn-fit { display: none; }
+  .bar-tools .chip { padding: 5px 8px; }
+  .mode-seg button { min-width: 36px; padding: 4px 6px; }
+}
+
+@media (max-width: 760px) {
+  .doc-title { display: none; }
+  #btn-round { display: none; }
+  body:not([data-workspace-mode="canvas"]) #world { padding: 20px 12px 80px; }
+  #doc { padding: 44px 34px 70px; }
+}
+
+/* ================= v0.7.1 · 阅读模式批注侧栏：批注与阅读同屏 ================= */
+/* 阅读模式（非编辑、非画布）：批注卡从画布坐标改为文档右侧成列展示，
+   随文档滚动 —— 人边读边批时能看到自己写过的每一条 */
+body[data-workspace-mode="read"] #world {
+  display: flex; align-items: flex-start; gap: 22px;
+  max-width: 1400px; margin: 0 auto;
+}
+body[data-workspace-mode="read"] #page {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  width: auto; max-width: 960px;
+}
+body[data-workspace-mode="read"] #cards {
+  display: block; position: static; flex: 0 0 318px; align-self: flex-start;
+  margin-top: 86px; padding-bottom: 40px;
+}
+body[data-workspace-mode="read"] #cards .card {
+  position: static !important; left: auto !important; top: auto !important;
+  width: 300px; margin: 0 0 14px;
+  transition: box-shadow .18s, background .18s;
+}
+body[data-workspace-mode="read"] #cards .card:hover { transform: none; }
+body[data-workspace-mode="read"] #cards:empty { display: none; }
+body[data-workspace-mode="read"] #page { min-width: 0; }
+/* 编辑模式保持无卡片（专注源码） */
+body[data-workspace-mode="edit"] #cards { display: none; }
+
+/* 窄窗：批注侧栏收起，文档占满可读宽度（批注经顶栏「批注」抽屉查看） */
+@media (max-width: 1180px) {
+  body[data-workspace-mode="read"] #world { display: block; }
+  body[data-workspace-mode="read"] #cards { display: none; }
+  body[data-workspace-mode="read"] #page { margin: 0 auto; width: min(960px, 100%); }
+}

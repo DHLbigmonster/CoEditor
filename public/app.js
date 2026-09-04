@@ -7,7 +7,12 @@ const RAIL_X = PAGE_W + 90;
 const view = { panX: 60, panY: 40, zoom: 1 };
 const state = { path: null, text: "", mtime: 0, annotations: [], selected: null,
   arrows: [], notes: [], images: [], drafts: [], canvasTool: "select", arrowColor: "red", canvasSelected: null,
-  vaultRoot: "" };
+  vaultRoot: "", workspaceMode: "read" };
+
+function isCanvasMode() { return state.workspaceMode === "canvas"; }
+function isEditableDocument() {
+  return state.mode === "text" && /\.(md|markdown|txt|html?|json|csv)$/i.test(state.path || "");
+}
 
 /* 画布元素按文档归属：无 doc 的旧元素视为全局，始终显示 */
 function ownsCanvas(item) {
@@ -17,6 +22,7 @@ function ownsCanvas(item) {
 /* ---------------- 坐标 ---------------- */
 /* 画布边界：视野 clamp 到「内容 bbox ± slack」，不需要滑到很远的地方 */
 function clampView() {
+  if (!isCanvasMode()) return;
   const page = $("page");
   const contentW = (page.offsetWidth + CARD_W + 160) || PAGE_W + CARD_W;
   const contentH = (page.offsetHeight + 160) || 900;
@@ -27,6 +33,16 @@ function clampView() {
 }
 
 function applyTransform() {
+  if (!isCanvasMode()) {
+    const world = $("world");
+    world.style.transform = "none";
+    $("page").style.zoom = String(view.zoom);
+    $("zoom").textContent = `${Math.round(view.zoom * 100)}%`;
+    $("viewport").style.backgroundSize = "auto";
+    $("viewport").style.backgroundPosition = "0 0";
+    return;
+  }
+  $("page").style.zoom = "";
   clampView();
   $("world").style.transform = `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`;
   $("zoom").textContent = `${Math.round(view.zoom * 100)}%`;
@@ -37,13 +53,32 @@ function applyTransform() {
 }
 
 function toWorld(clientX, clientY) {
+  if (!isCanvasMode()) {
+    const rect = $("world").getBoundingClientRect();
+    return { x: (clientX - rect.left) / view.zoom, y: (clientY - rect.top) / view.zoom };
+  }
   const rect = $("viewport").getBoundingClientRect();
   return { x: (clientX - rect.left - view.panX) / view.zoom, y: (clientY - rect.top - view.panY) / view.zoom };
 }
 
 function worldRect(element) {
   const rect = element.getBoundingClientRect();
-  const topLeft = toWorld(rect.left, rect.top);
+  // iframe 内元素的 rect 是 iframe 视口坐标，先换算回父页面视口坐标（两种模式都需要）
+  let left = rect.left;
+  let top = rect.top;
+  if (element.ownerDocument !== document) {
+    const frame = $("html-frame");
+    if (frame) {
+      const frameRect = frame.getBoundingClientRect();
+      left += frameRect.left;
+      top += frameRect.top;
+    }
+  }
+  if (!isCanvasMode()) {
+    const world = $("world").getBoundingClientRect();
+    return { x: (left - world.left) / view.zoom, y: (top - world.top) / view.zoom, w: rect.width / view.zoom, h: rect.height / view.zoom };
+  }
+  const topLeft = toWorld(left, top);
   return {
     x: topLeft.x,
     y: topLeft.y,
@@ -53,6 +88,16 @@ function worldRect(element) {
 }
 
 function zoomAt(factor, clientX, clientY) {
+  if (!isCanvasMode()) {
+    const viewport = $("viewport");
+    const old = view.zoom;
+    view.zoom = Math.min(2, Math.max(0.65, view.zoom * factor));
+    const ratio = view.zoom / old;
+    viewport.scrollLeft = (viewport.scrollLeft + clientX - viewport.getBoundingClientRect().left) * ratio - (clientX - viewport.getBoundingClientRect().left);
+    viewport.scrollTop = (viewport.scrollTop + clientY - viewport.getBoundingClientRect().top) * ratio - (clientY - viewport.getBoundingClientRect().top);
+    applyTransform();
+    return;
+  }
   const next = Math.min(2.4, Math.max(0.3, view.zoom * factor));
   const rect = $("viewport").getBoundingClientRect();
   const px = clientX - rect.left;
@@ -64,6 +109,11 @@ function zoomAt(factor, clientX, clientY) {
 }
 
 function centerOn(worldX, worldY) {
+  if (!isCanvasMode()) {
+    const viewport = $("viewport");
+    viewport.scrollTo({ top: Math.max(0, worldY * view.zoom - viewport.clientHeight * .3), behavior: "smooth" });
+    return;
+  }
   const rect = $("viewport").getBoundingClientRect();
   view.panX = rect.width / 2 - worldX * view.zoom;
   view.panY = rect.height / 2 - worldY * view.zoom;
@@ -71,6 +121,12 @@ function centerOn(worldX, worldY) {
 }
 
 function fit() {
+  if (!isCanvasMode()) {
+    view.zoom = 1;
+    applyTransform();
+    $("viewport").scrollTo({ left: 0, top: 0, behavior: "smooth" });
+    return;
+  }
   const rect = $("viewport").getBoundingClientRect();
   const pageH = $("page").offsetHeight || 800;
   let contentW = PAGE_W;
@@ -120,6 +176,59 @@ function figureHtml(src, alt) {
     + `</figure>`;
 }
 
+function htmlAssetUrl(value) {
+  if (!value || /^(#|https?:|data:|blob:|mailto:|tel:|javascript:)/i.test(value)) return value;
+  const resolved = resolveAssetPath(value);
+  return `/api/raw?p=${encodeURIComponent(resolved)}`;
+}
+
+function rewriteCssAssets(css) {
+  return css.replace(/url\((['"]?)([^)'"\s]+)\1\)/gi, (match, quote, value) => {
+    const next = htmlAssetUrl(value);
+    return next === value ? match : `url("${next}")`;
+  });
+}
+
+/* HTML 在隔离 iframe 中按原网页渲染。保留 CSS 与布局，不允许脚本触碰 CoEditor。 */
+function htmlPreviewSource(source) {
+  const parsed = new DOMParser().parseFromString(source, "text/html");
+  parsed.querySelectorAll("script").forEach((node) => node.remove());
+  parsed.querySelectorAll("*").forEach((node) => {
+    for (const attr of [...node.attributes]) {
+      if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
+    }
+    for (const name of ["src", "href", "poster"]) {
+      if (node.hasAttribute(name)) node.setAttribute(name, htmlAssetUrl(node.getAttribute(name)));
+    }
+    if (node.hasAttribute("srcset")) {
+      node.setAttribute("srcset", node.getAttribute("srcset").split(",").map((part) => {
+        const [url, descriptor] = part.trim().split(/\s+/, 2);
+        return `${htmlAssetUrl(url)}${descriptor ? ` ${descriptor}` : ""}`;
+      }).join(", "));
+    }
+    if (node.hasAttribute("style")) node.setAttribute("style", rewriteCssAssets(node.getAttribute("style")));
+  });
+  parsed.querySelectorAll("style").forEach((node) => { node.textContent = rewriteCssAssets(node.textContent); });
+  const guard = parsed.createElement("style");
+  guard.textContent = `html{background:#fff;color-scheme:light} body{min-height:100vh}
+    ::selection{background:rgba(239,107,78,.24)}
+    .anchor{background:rgba(239,107,78,.16);box-shadow:inset 0 -2px 0 rgba(239,107,78,.72);border-radius:2px;cursor:pointer}
+    .anchor[data-kind="highlight"]{background:rgba(246,211,91,.44);box-shadow:none}
+    .anchor[data-kind="strike"]{background:rgba(239,107,78,.08);box-shadow:none;text-decoration:line-through;text-decoration-color:rgba(220,83,64,.9);text-decoration-thickness:2px}
+    .anchor[data-status="deprecated"]{opacity:.45}`;
+  parsed.head.appendChild(guard);
+  return `<!doctype html>${parsed.documentElement.outerHTML}`;
+}
+
+function annotationRoot() {
+  const frame = $("html-frame");
+  return frame && frame.contentDocument && frame.contentDocument.body ? frame.contentDocument.body : $("doc");
+}
+
+function findAnchor(id) {
+  return annotationRoot().querySelector(`.anchor[data-ann="${id}"]`);
+}
+
 function renderMarkdown(source) {
   const out = [];
   let list = null;
@@ -150,7 +259,8 @@ function renderMarkdown(source) {
 
 /* ---------------- 锚点 ---------------- */
 function buildIndex(root) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const owner = root.ownerDocument || document;
+  const walker = owner.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const map = [];
   let text = "";
   let node;
@@ -195,16 +305,17 @@ function wrapRange(map, start, end, id) {
     const { node, offset } = map[i];
     let length = 1;
     while (i + length < end && map[i + length] && map[i + length].node === node && map[i + length].offset === offset + length) length += 1;
-    const range = document.createRange();
+    const owner = node.ownerDocument || document;
+    const range = owner.createRange();
     range.setStart(node, offset);
     range.setEnd(node, offset + length);
-    const mark = document.createElement("mark");
+    const mark = owner.createElement("mark");
     mark.dataset.ann = id;
     mark.className = "anchor";
     try {
       range.surroundContents(mark);
     } catch {
-      const span = document.createElement("span");
+      const span = owner.createElement("span");
       span.dataset.ann = id;
       span.className = "anchor";
       span.appendChild(range.extractContents());
@@ -216,9 +327,10 @@ function wrapRange(map, start, end, id) {
 
 async function anchorAll() {
   let decayed = 0;
+  const root = annotationRoot();
   for (const annotation of state.annotations) {
     if (annotation.region) continue; // 区域批注不参与文本锚定
-    const index = buildIndex($("doc")); // 每条重建：wrapRange 会改变 DOM 文本节点
+    const index = buildIndex(root); // 每条重建：wrapRange 会改变 DOM 文本节点
     const hit = locate(index, annotation);
     annotation.__lost = !hit;
     annotation.__drifted = Boolean(hit && hit.drifted);
@@ -233,7 +345,7 @@ async function anchorAll() {
     }
     wrapRange(index.map, hit.start, hit.end, annotation.id);
   }
-  document.querySelectorAll(".anchor").forEach((node) => {
+  root.querySelectorAll(".anchor").forEach((node) => {
     const item = state.annotations.find((entry) => entry.id === node.dataset.ann);
     node.dataset.status = item ? item.status : "active";
     node.dataset.kind = item && (item.kind === "highlight" || item.kind === "strike") ? item.kind : "comment";
@@ -314,7 +426,7 @@ function cardElement(annotation) {
 
   card.addEventListener("click", (event) => {
     if (event.target.tagName === "BUTTON") return;
-    const mark = $("doc").querySelector(`.anchor[data-ann="${annotation.id}"]`);
+    const mark = findAnchor(annotation.id);
     if (!mark) return toast("这条批注的原文已找不到，已自动标记过期");
     mark.classList.remove("flash");
     void mark.offsetWidth;
@@ -377,7 +489,7 @@ function drawLines() {
   svg.innerHTML = "";
   const pageRect = worldRect($("page"));
   for (const annotation of state.annotations) {
-    const mark = $("doc").querySelector(`.anchor[data-ann="${annotation.id}"]`)
+    const mark = findAnchor(annotation.id)
       || $("doc").querySelector(`.region[data-ann="${annotation.id}"]`);
     const card = $("cards").querySelector(`.card[data-id="${annotation.id}"]`);
     const cardX = annotation.x ?? RAIL_X;
@@ -1190,12 +1302,12 @@ window.addEventListener("keydown", (event) => {
   const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
   if (typing || event.metaKey || event.ctrlKey) return;
   if (event.key === "Escape" && !$("fs-modal").hidden) { $("fs-modal").hidden = true; return; } // 文件夹选择器优先响应 Esc
-  if (event.key === "v" || event.key === "V") setTool("select");
-  if (event.key === "a" || event.key === "A") setTool("arrow");
-  if (event.key === "n" || event.key === "N") setTool("note");
-  if (event.key === "i" || event.key === "I") $("file-input").click();
-  if (event.key === "w" || event.key === "W") setTool("board");
-  if (event.key === "r" || event.key === "R") setTool("region");
+  if (isCanvasMode() && (event.key === "v" || event.key === "V")) setTool("select");
+  if (isCanvasMode() && (event.key === "a" || event.key === "A")) setTool("arrow");
+  if (isCanvasMode() && (event.key === "n" || event.key === "N")) setTool("note");
+  if (isCanvasMode() && (event.key === "i" || event.key === "I")) $("file-input").click();
+  if (isCanvasMode() && (event.key === "w" || event.key === "W")) setTool("board");
+  if (isCanvasMode() && (event.key === "r" || event.key === "R")) setTool("region");
   if (event.key === "Escape") { selectCanvas(null); setTool("select"); }
   if (event.key === "?" || (event.shiftKey && event.key === "/")) {
     const help = $("shortcut-help");
@@ -1256,7 +1368,7 @@ function estimateCardHeight(annotation) {
 }
 
 function anchorY(annotation) {
-  const mark = $("doc").querySelector(`.anchor[data-ann="${annotation.id}"]`)
+  const mark = findAnchor(annotation.id)
     || $("doc").querySelector(`.region[data-ann="${annotation.id}"]`);
   if (mark) return worldRect(mark).y;
   return annotation.y ?? 0;
@@ -1302,8 +1414,9 @@ async function waitForPdfRenderer(timeout = 6000) {
 async function renderDocument() {
   if (editSession) return; // 编辑态不重渲染，外部修改由保存时 409 提示
   const host = $("doc");
-  host.classList.remove("docx-view");
+  host.classList.remove("docx-view", "html-view", "pdf-view", "image-view");
   if (state.mode === "pdf") {
+    host.classList.add("pdf-view");
     if (!(await waitForPdfRenderer())) {
       host.innerHTML = '<p style="color:#c99537">PDF 渲染器未能加载（离线？）。可用系统预览打开。</p>';
       return;
@@ -1347,6 +1460,7 @@ async function renderDocument() {
     return;
   }
   if (state.mode === "image") {
+    host.classList.add("image-view");
     host.innerHTML = `
       <div class="image-stage" id="image-stage">
         <img id="image-node" src="/api/raw?p=${encodeURIComponent(state.path)}" alt="" />
@@ -1354,9 +1468,36 @@ async function renderDocument() {
       </div>`;
     return;
   }
-  host.innerHTML = /\.html?$/i.test(state.path || "")
-    ? state.text.replace(/<script[\s\S]*?<\/script>/gi, "") // 本地只读渲染，剥离脚本防注入
-    : renderMarkdown(state.text);
+  if (/\.html?$/i.test(state.path || "")) {
+    host.classList.add("html-view");
+    host.innerHTML = "";
+    const frame = document.createElement("iframe");
+    frame.id = "html-frame";
+    frame.title = state.path.split("/").pop() || "HTML 预览";
+    frame.sandbox = "allow-same-origin"; // 同源仅用于选择文字；未开放脚本执行
+    frame.referrerPolicy = "no-referrer";
+    host.appendChild(frame);
+    await new Promise((resolve) => {
+      frame.addEventListener("load", () => {
+        const resize = () => {
+          const inner = frame.contentDocument;
+          if (!inner) return;
+          frame.style.height = `${Math.max(720, inner.documentElement.scrollHeight, inner.body ? inner.body.scrollHeight : 0)}px`;
+        };
+        resize();
+        if (window.ResizeObserver && frame.contentDocument && frame.contentDocument.body) {
+          const observer = new ResizeObserver(resize);
+          observer.observe(frame.contentDocument.body);
+          frame.__coeditorObserver = observer;
+        }
+        bindHtmlSelection(frame);
+        resolve();
+      }, { once: true });
+      frame.srcdoc = htmlPreviewSource(state.text);
+    });
+    return;
+  }
+  host.innerHTML = renderMarkdown(state.text);
 }
 
 async function loadAnnotations() {
@@ -1389,8 +1530,11 @@ async function loadAnnotations() {
 }
 
 async function openDoc(path, { push = true } = {}) {
+  if (editSession) leaveEditUi();
   state.path = path;
   state.mode = kindOf(path);
+  if (state.workspaceMode === "edit") state.workspaceMode = "read";
+  syncWorkspaceModeUi();
   if (push) history.pushState({ doc: path }, "", `?doc=${encodeURIComponent(path)}`);
   const response = await fetch(`/api/doc?p=${encodeURIComponent(path)}`);
   if (response.ok) {
@@ -1402,6 +1546,7 @@ async function openDoc(path, { push = true } = {}) {
     state.mtime = 0;
   }
   $("docpath").textContent = path;
+  document.querySelectorAll("#tree .file").forEach((node) => node.classList.toggle("current", node.dataset.path === path));
   $("empty").style.display = "none";
   $("btn-export").hidden = state.mode !== "image";
   document.querySelectorAll("#tree .file").forEach((node) => node.classList.toggle("current", node.dataset.path === path));
@@ -1410,8 +1555,16 @@ async function openDoc(path, { push = true } = {}) {
   initialView();
 }
 
-/* 首屏视图：阅读导向 —— 页面 + 一列批注卡同时入镜，顶部对齐；纵向把画布元素也纳入视野 */
+/* 阅读模式按自然文档流打开；只有画布模式才把页面与卡片一起缩放到世界坐标。 */
 function initialView() {
+  if (!isCanvasMode()) {
+    view.zoom = 1;
+    view.panX = 0;
+    view.panY = 0;
+    applyTransform();
+    $("viewport").scrollTo({ top: 0, left: 0 });
+    return;
+  }
   const rect = $("viewport").getBoundingClientRect();
   const pageW = $("page").offsetWidth || PAGE_W;
   const contentW = pageW + CARD_W + 60;
@@ -1440,7 +1593,7 @@ async function loadTree() {
   const dot = { text: "#6b6864", pdf: "#c99537", image: "#6fa055" };
   const render = (nodes, depth) => nodes.map((node) => node.type === "dir"
     ? `<div class="dir" style="padding-left:${20 + depth * 12}px">${escapeHtml(node.name)}</div>${render(node.children || [], depth + 1)}`
-    : `<div class="file" data-path="${escapeHtml(node.path)}" style="padding-left:${20 + depth * 12}px"><i style="background:${dot[node.kind] || dot.text}"></i>${escapeHtml(node.name)}</div>`).join("");
+    : `<div class="file" data-path="${escapeHtml(node.path)}" title="${escapeHtml(node.path)}" style="padding-left:${20 + depth * 12}px"><i style="background:${dot[node.kind] || dot.text}"></i>${escapeHtml(node.name)}</div>`).join("");
   $("tree").innerHTML = render(data.tree, 0);
   $("tree").querySelectorAll(".file").forEach((node) => {
     node.addEventListener("click", () => openDoc(node.dataset.path));
@@ -1460,34 +1613,65 @@ function showSelMenu(rect) {
 }
 function hideSelMenu() { $("sel-menu").hidden = true; }
 
-$("page").addEventListener("mouseup", (event) => {
+function captureTextSelection(root, selection, rectOffset = { left: 0, top: 0 }) {
   if (state.mode === "image") return; // 图片走区域框选，不参与文字选区
   if (state.canvasTool === "region") return; // 区域工具拖框中：不触发文字浮条（且不 stopPropagation 挡掉 region 的 mouseup 监听）
   if (document.body.classList.contains("editing-doc")) return; // 编辑态由 textarea 自己处理
-  const selection = window.getSelection();
   const text = String(selection).trim();
-  if (!text || !$("doc").contains(selection.anchorNode)) { hideSelMenu(); return; }
+  if (!text || !root.contains(selection.anchorNode) || !selection.rangeCount) { hideSelMenu(); return; }
   const range = selection.getRangeAt(0);
-  const container = $("doc");
-  const before = document.createRange();
-  before.setStart(container, 0);
+  const owner = root.ownerDocument || document;
+  const before = owner.createRange();
+  before.setStart(root, 0);
   before.setEnd(range.startContainer, range.startOffset);
-  const after = document.createRange();
+  const after = owner.createRange();
   after.setStart(range.endContainer, range.endOffset);
-  after.setEnd(container, container.childNodes.length);
+  after.setEnd(root, root.childNodes.length);
+  const innerRect = range.getBoundingClientRect();
+  const rect = {
+    left: innerRect.left + rectOffset.left,
+    right: innerRect.right + rectOffset.left,
+    top: innerRect.top + rectOffset.top,
+    bottom: innerRect.bottom + rectOffset.top,
+    width: innerRect.width,
+    height: innerRect.height,
+  };
   pending = {
     quote: text,
     prefix: String(before).slice(-40),
     suffix: String(after).slice(0, 40),
-    worldY: worldRect(range).y,
+    worldY: toWorld(rect.left, rect.top).y,
+    clientRect: rect,
   };
-  showSelMenu(range.getBoundingClientRect());
-  event.stopPropagation();
+  showSelMenu(rect);
+}
+
+$("page").addEventListener("mouseup", (event) => {
+  captureTextSelection($("doc"), window.getSelection());
+  if (pending) event.stopPropagation(); // 只有真弹出浮条才拦截冒泡；region 拖框等流程的 window 级 mouseup 监听必须能收到
 });
+
+function bindHtmlSelection(frame) {
+  const inner = frame.contentDocument;
+  if (!inner || !inner.body) return;
+  inner.addEventListener("mouseup", () => {
+    const frameRect = frame.getBoundingClientRect();
+    captureTextSelection(inner.body, frame.contentWindow.getSelection(), { left: frameRect.left, top: frameRect.top });
+  });
+  inner.addEventListener("mousedown", () => hideSelMenu());
+}
+
+function clearTextSelections() {
+  window.getSelection().removeAllRanges();
+  const frame = $("html-frame");
+  if (frame && frame.contentWindow) frame.contentWindow.getSelection().removeAllRanges();
+}
 
 document.addEventListener("mousedown", (event) => {
   const menu = $("sel-menu");
   if (!menu.hidden && !menu.contains(event.target)) hideSelMenu();
+  const viewMenu = $("view-menu");
+  if (viewMenu && viewMenu.open && !viewMenu.contains(event.target)) viewMenu.open = false;
 });
 
 $("sel-menu").addEventListener("mousedown", (event) => event.stopPropagation());
@@ -1508,7 +1692,7 @@ $("sel-menu").addEventListener("click", async (event) => {
   });
   const quote = pending.quote;
   pending = null;
-  window.getSelection().removeAllRanges();
+  clearTextSelections();
   await loadAnnotations();
   toast(kind === "highlight" ? `已高亮「${quote.slice(0, 18)}…」` : `已标记删除线「${quote.slice(0, 18)}…」`);
 });
@@ -1516,7 +1700,7 @@ $("sel-menu").addEventListener("click", async (event) => {
 function openComposer() {
   if (!pending) return;
   const composer = $("composer");
-  const rect = window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).getBoundingClientRect() : { bottom: 200, left: 200 };
+  const rect = pending.clientRect || (window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).getBoundingClientRect() : { bottom: 200, left: 200 });
   composer.hidden = false;
   composer.style.top = `${Math.min(rect.bottom + 10, window.innerHeight - 220)}px`;
   composer.style.left = `${Math.min(rect.left, window.innerWidth - 360)}px`;
@@ -1530,7 +1714,7 @@ function closeComposer() {
   $("composer").hidden = true;
   $("composer-input").value = "";
   pending = null;
-  window.getSelection().removeAllRanges();
+  clearTextSelections();
 }
 
 async function saveAnnotation() {
@@ -1565,14 +1749,53 @@ $("composer-input").addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeComposer();
 });
 
-/* ---------------- Markdown 编辑模式（阅读 ⇄ 编辑，双击切换，参考 VSCode） ---------------- */
+/* ---------------- 文本编辑模式（Markdown / HTML 源码） ---------------- */
 let editSession = null; // { textarea, bar, baseMtime }
 
 $("page").addEventListener("dblclick", (event) => {
-  if (state.mode !== "text" || /\.html?$/i.test(state.path || "")) return;
+  if (!isEditableDocument()) return;
   if (document.body.classList.contains("editing-doc")) return;
   if (event.target.closest(".card") || event.target.closest("figure")) return;
-  enterEditMode();
+  setWorkspaceMode("edit");
+});
+
+function syncWorkspaceModeUi() {
+  document.body.dataset.workspaceMode = state.workspaceMode;
+  document.querySelectorAll("#workspace-modes [data-workspace-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.workspaceMode === state.workspaceMode);
+    if (button.dataset.workspaceMode === "edit") {
+      button.disabled = !isEditableDocument();
+      button.title = isEditableDocument() ? "编辑 Markdown / HTML 源码" : "此格式目前只读；可在画布中批注";
+    }
+  });
+  $("btn-fit").textContent = isCanvasMode() ? "显示全部" : "适合宽度";
+  $("btn-layout").disabled = !isCanvasMode();
+  $("btn-lines").disabled = !isCanvasMode();
+}
+
+async function setWorkspaceMode(mode) {
+  if (mode === "edit" && !isEditableDocument()) {
+    toast("这种格式目前只读；Markdown、HTML、TXT、JSON、CSV 可以直接编辑");
+    return;
+  }
+  if (mode === state.workspaceMode && (mode !== "edit" || editSession)) return;
+  if (editSession && mode !== "edit") leaveEditUi();
+  state.workspaceMode = mode;
+  if (mode !== "canvas") setTool("select");
+  syncWorkspaceModeUi();
+  if (mode === "edit") {
+    view.zoom = 1;
+    applyTransform();
+    enterEditMode();
+    return;
+  }
+  if (!editSession) await loadAnnotations();
+  initialView();
+}
+
+$("workspace-modes").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-workspace-mode]");
+  if (button && !button.disabled) setWorkspaceMode(button.dataset.workspaceMode);
 });
 
 function enterEditMode() {
@@ -1589,9 +1812,9 @@ function enterEditMode() {
   const bar = document.createElement("div");
   bar.id = "edit-bar";
   bar.innerHTML = `
-    <span class="eb-hint">编辑模式 · Markdown 源码 · 保存后批注自动重新锚定</span>
+    <span class="eb-hint">编辑模式 · ${/\.html?$/i.test(state.path || "") ? "HTML" : "Markdown / 文本"} 源码 · 保存后批注自动重新锚定</span>
     <button id="edit-save" class="primary">保存 ⌘S</button>
-    <button id="edit-cancel" class="ghost">完成</button>`;
+    <button id="edit-cancel" class="ghost">返回阅读</button>`;
   $("page").prepend(bar);
   editSession = { textarea, baseMtime: state.mtime };
   textarea.addEventListener("keydown", (event) => {
@@ -1599,7 +1822,7 @@ function enterEditMode() {
     if ((event.metaKey || event.ctrlKey) && event.key === "s") { event.preventDefault(); saveEdit(); }
   });
   $("edit-save").addEventListener("click", saveEdit);
-  $("edit-cancel").addEventListener("click", exitEditMode);
+  $("edit-cancel").addEventListener("click", () => setWorkspaceMode("read"));
   textarea.focus();
 }
 
@@ -1621,17 +1844,19 @@ async function saveEdit() {
   state.mtime = data.mtime;
   state.text = editSession.textarea.value; // 同步内存文本，loadAnnotations 重渲染才用新内容
   toast("已保存，批注正在重新锚定");
-  exitEditMode();
+  leaveEditUi();
+  state.workspaceMode = "read";
+  syncWorkspaceModeUi();
   await loadAnnotations();
+  initialView();
 }
 
-function exitEditMode() {
+function leaveEditUi() {
   if (!editSession) return;
   editSession = null;
   document.body.classList.remove("editing-doc");
   const bar = $("edit-bar");
   if (bar) bar.remove();
-  loadAnnotations(); // 重渲染 + 重锚定
 }
 
 /* PDF 列布局切换（1/2/3 列，像正常阅读 PDF 一样展开） */
@@ -1707,6 +1932,7 @@ function startPdfRegionDraft(event) {
 /* ---------------- 画布交互 ---------------- */
 $("viewport").addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
+  if (!isCanvasMode()) return;
   // PDF 区域框选（苹果预览式）：区域工具激活时，落在 PDF 页上的拖拽画框选批注
   if (state.canvasTool === "region" && event.target.closest(".pdf-page")) { startPdfRegionDraft(event); return; }
   if (event.target.closest(".card") || event.target.closest("#page") || event.target.closest("#composer") || event.target.closest(".note") || event.target.closest(".arrow-g")) return;
@@ -1735,6 +1961,7 @@ $("viewport").addEventListener("mousedown", (event) => {
 });
 
 $("viewport").addEventListener("wheel", (event) => {
+  if (!isCanvasMode() && !(event.ctrlKey || event.metaKey)) return;
   event.preventDefault();
   if (event.ctrlKey || event.metaKey) {
     zoomAt(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX, event.clientY);
@@ -1757,22 +1984,49 @@ $("btn-fit").addEventListener("click", fit);
 $("btn-layout").addEventListener("click", tidyLayout);
 $("btn-theme").addEventListener("click", () => {
   document.body.classList.toggle("paper-dark");
-  $("btn-theme").textContent = document.body.classList.contains("paper-dark") ? "暗色纸" : "纸张";
+  $("btn-theme").textContent = document.body.classList.contains("paper-dark") ? "纸张：暗色" : "纸张：明亮";
 });
 $("btn-focus").addEventListener("click", (event) => {
   const on = event.currentTarget.dataset.on === "1";
   event.currentTarget.dataset.on = on ? "0" : "1";
   document.body.classList.toggle("focus-active", !on);
+  event.currentTarget.textContent = on ? "批注：全部" : "批注：仅生效";
 });
 $("btn-lines").addEventListener("click", (event) => {
   const on = event.currentTarget.dataset.on === "1";
   event.currentTarget.dataset.on = on ? "0" : "1";
   document.body.classList.toggle("lines-quiet", !on);
+  event.currentTarget.textContent = on ? "连接线：显示" : "连接线：自动";
   drawLines();
 });
 $("rail-toggle").addEventListener("click", () => {
   document.body.classList.toggle("rail-hidden");
   setTimeout(applyTransform, 240);
+});
+
+/* 侧栏像编辑器一样可拖动，宽度只保存在本机浏览器。 */
+const savedRailWidth = Number(localStorage.getItem("coeditor.railWidth"));
+if (Number.isFinite(savedRailWidth)) document.documentElement.style.setProperty("--rail-width", `${Math.min(480, Math.max(220, savedRailWidth))}px`);
+$("rail-resizer").addEventListener("pointerdown", (event) => {
+  if (document.body.classList.contains("rail-hidden")) return;
+  event.preventDefault();
+  $("rail-resizer").setPointerCapture(event.pointerId);
+  document.body.classList.add("resizing-rail");
+  const move = (moveEvent) => {
+    const width = Math.min(480, Math.max(220, moveEvent.clientX));
+    document.documentElement.style.setProperty("--rail-width", `${width}px`);
+    localStorage.setItem("coeditor.railWidth", String(Math.round(width)));
+    applyTransform();
+  };
+  const up = () => {
+    $("rail-resizer").removeEventListener("pointermove", move);
+    $("rail-resizer").removeEventListener("pointerup", up);
+    $("rail-resizer").removeEventListener("pointercancel", up);
+    document.body.classList.remove("resizing-rail");
+  };
+  $("rail-resizer").addEventListener("pointermove", move);
+  $("rail-resizer").addEventListener("pointerup", up);
+  $("rail-resizer").addEventListener("pointercancel", up);
 });
 
 /* ---------------- 约束清单抽屉 ---------------- */
@@ -1870,7 +2124,7 @@ function toast(message) {
   toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
 }
 
-/* ---------------- 批次：锁定一轮批注，交给 Agent 后自动推进 ---------------- */
+/* ---------------- 批次：只有人明确点击才推进，文件 mtime 变化不替人做产品判断 ---------------- */
 $("btn-round").addEventListener("click", async () => {
   const res = await fetch("/api/rounds", {
     method: "POST",
@@ -1881,7 +2135,7 @@ $("btn-round").addEventListener("click", async () => {
   const data = await res.json();
   await loadAnnotations();
   renderDrawer();
-  toast(`批次 ${data.closed} 已交付归档，新批注将属于批次 ${data.activeRound}`);
+  toast(`本轮 R${data.closed} 已归档，新批注进入 R${data.activeRound}`);
 });
 
 /* ---------------- 白板：画布上的一块可写大白板（想法草稿区，不入约束） ---------------- */
@@ -1948,7 +2202,7 @@ $("fs-open").addEventListener("click", async () => {
   toast(`已切换到 ${data.root}`);
 });
 
-/* ---------------- 外部修改感知：Agent 改完文档 = 本轮结束，自动推进批次 ---------------- */
+/* ---------------- 外部修改感知：只重新锚定，不自动推进批次 ---------------- */
 /* 防误判：先验服务端当前 vault。目录被其他标签页/CLI 切走时，同相对路径会读到别的文件，
    mtime 必然变化 —— 不验 vault 就会虚推进批次（真实事故：2 秒内连推 7 轮）。 */
 async function resetDocView() {
@@ -1981,19 +2235,7 @@ setInterval(async () => {
   if (data.mtime === state.mtime) return;
   state.text = data.text;
   state.mtime = data.mtime;
-  try {
-    const r = await fetch("/api/rounds", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "save" }),
-    });
-    if (r.ok) {
-      const rd = await r.json();
-      toast(`检测到 Agent 已修改文档 · 批次 ${rd.closed} 归档，新批注属于批次 ${rd.activeRound}`);
-    }
-  } catch {
-    toast("文档被外部修改，批注正在重新锚定");
-  }
+  toast("检测到文件已更新：批注正在重新锚定，本轮编号保持不变");
   await loadAnnotations();
 }, 4000);
 
@@ -2004,6 +2246,7 @@ window.addEventListener("popstate", (event) => {
 });
 
 loadTree().then(async () => {
+  syncWorkspaceModeUi();
   await loadCanvas();
   const wanted = new URLSearchParams(location.search).get("doc");
   const fallback = document.querySelector("#tree .file");

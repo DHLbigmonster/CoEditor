@@ -3,10 +3,10 @@
 //       → 切 2 列重渲染 → overlay 仍复位在正确页
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 
-const BASE = "http://127.0.0.1:4400";
+const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4400"));
-if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4400", { method: "PUT" })).json(); }
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4401"));
+if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json(); }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pendingMap = new Map();
 const send = (method, params = {}) => new Promise((res, rej) => {
@@ -41,7 +41,8 @@ for (let i = 0; i < 20; i += 1) {
 }
 
 // 激活区域工具（走真实代码路径）
-result.toolOn = await evaluate(`(setTool("region"), document.body.dataset.tool)`);
+result.toolOn = await evaluate(`(async () => { await setWorkspaceMode("canvas"); setTool("region"); return document.body.dataset.workspaceMode + "/" + document.body.dataset.tool; })()`);
+await sleep(2800); // 画布切换会触发 PDF 按画布宽度重渲染，等稳定再量坐标
 const before = await evaluate(`document.querySelectorAll("#cards .card").length`);
 
 // 第 1 页中央框一块 20%~70% 的区域

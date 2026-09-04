@@ -31,8 +31,10 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
     wrapper.style.marginBottom = `${gap}px`;
 
     const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
+    // PDF.js 官方 HiDPI 模式：CSS 尺寸维持阅读布局，像素缓冲按设备倍率渲染。
+    const outputScale = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width = Math.floor(viewport.width * outputScale);
+    canvas.height = Math.floor(viewport.height * outputScale);
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
     wrapper.appendChild(canvas);
@@ -51,7 +53,8 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
     container.appendChild(wrapper);
 
     const context = canvas.getContext("2d");
-    await page.render({ canvasContext: context, viewport }).promise;
+    const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
+    await page.render({ canvasContext: context, viewport, transform }).promise;
 
     const content = await page.getTextContent();
     for (const item of content.items) {

@@ -4,12 +4,12 @@
 // 前置：已 POST /api/vault 切到一次性副本 vault（测试数据不污染 sample）
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 
-const BASE = "http://127.0.0.1:4400";
+const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const list = await (await fetch(`${BASE.replace("4400", "9333").replace("http", "http")}`)).json().catch(() => null);
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4400"));
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4401"));
 if (!page) {
-  page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4400", { method: "PUT" })).json();
+  page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json();
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pending = new Map();

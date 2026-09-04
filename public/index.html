@@ -25,18 +25,21 @@
     <div class="hint">Agent 读取：<code id="api-hint">/api/constraints</code></div>
   </div>
 </aside>
+<div id="rail-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" title="拖动调整侧栏宽度"></div>
 
 <main id="main">
   <header id="bar">
     <button id="rail-toggle" class="icon" title="收起侧栏">◧</button>
     <div class="doc-title" id="docpath">未选择文档</div>
     <div class="bar-tools">
-      <button id="btn-round" class="chip ask" title="锁定当前批次：本轮批注归档，之后的批注进入下一批次（Agent 改完文档后也会自动推进）">保存本批次</button>
-      <button id="btn-edit-ask" class="chip" title="组装完整修改指令（目标文件 + 逐条约束 + 标注图），一键复制给 Agent">复制 Agent 指令</button>
-      <button id="btn-layout" class="chip" title="卡片排序归位，回到默认查阅视图">整理布局</button>
-      <button id="btn-focus" class="chip" data-on="1">只看生效</button>
-      <button id="btn-lines" class="chip" data-on="0" title="连线降噪：开启后仅悬停/选中的批注显示牵引线">连线</button>
-      <button id="btn-drawer" class="chip">批注历史</button>
+      <span id="workspace-modes" class="seg mode-seg" title="阅读、编辑与自由画布各自使用最合适的交互">
+        <button data-workspace-mode="read" class="active">阅读</button>
+        <button data-workspace-mode="edit">编辑</button>
+        <button data-workspace-mode="canvas">画布</button>
+      </span>
+      <button id="btn-round" class="chip" title="明确结束本轮批注，并开启下一轮；外部文件变化不会自动推进轮次">完成本轮批注</button>
+      <button id="btn-edit-ask" class="chip ask" title="汇总当前批注、箭头和便签，生成可交给 Agent 的修改任务">交给 Agent</button>
+      <button id="btn-drawer" class="chip">批注</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
       <span id="bar-pdf-cols" class="seg" hidden title="PDF 页面布局：单列 / 双列 / 三列">
@@ -48,9 +51,16 @@
       <button id="btn-out" class="icon" title="缩小">−</button>
       <span id="zoom" class="zoom">100%</span>
       <button id="btn-in" class="icon" title="放大">＋</button>
-      <button id="btn-fit" class="chip">适应</button>
-      <span class="divider"></span>
-      <button id="btn-theme" class="chip" title="切换纸张明暗">纸张</button>
+      <button id="btn-fit" class="chip" title="阅读模式回到适合宽度；画布模式显示全部内容">适合宽度</button>
+      <details id="view-menu" class="view-menu">
+        <summary class="icon" title="更多视图选项">•••</summary>
+        <div class="view-menu-panel">
+          <button id="btn-layout" class="menu-action" title="把画布上的批注卡重新排列到对应原文旁边">重置画布布局</button>
+          <button id="btn-focus" class="menu-action" data-on="1">批注：仅生效</button>
+          <button id="btn-lines" class="menu-action" data-on="0" title="自动时只显示当前批注的连接线">连接线：自动</button>
+          <button id="btn-theme" class="menu-action" title="切换纸张明暗">纸张：明亮</button>
+        </div>
+      </details>
     </div>
   </header>
 
@@ -101,7 +111,7 @@
       <div class="sh-card">
         <div class="sh-head">快捷键 <button id="sh-close" class="icon">✕</button></div>
         <table>
-          <tr><td>双击文档</td><td>进入 Markdown 编辑（⌘S 保存 / 「完成」退出）</td></tr>
+          <tr><td>阅读 / 编辑</td><td>Markdown、HTML 可切换源码编辑（⌘S 保存）</td></tr>
           <tr><td>选中文字</td><td>弹出菜单：批注 / 高亮 / 删除线</td></tr>
           <tr><td><kbd>V</kbd></td><td>选择 / 平移</td></tr>
           <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>

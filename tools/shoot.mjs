@@ -3,7 +3,8 @@
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 import { readFileSync, writeFileSync } from "node:fs";
 
-const [, , url, out, waitMsArg, evalJs] = process.argv;
+const [, , url, out, waitMsArg, evalJs, whArg] = process.argv;
+const [vw, vh] = (whArg || "1440x900").split("x").map(Number);
 const waitMs = Number(waitMsArg || 2500);
 
 const list = await (await fetch("http://127.0.0.1:9333/json/list")).json();
@@ -26,13 +27,13 @@ ws.on("message", d => {
 await new Promise(r => ws.on("open", r));
 await send("Page.enable");
 await send("Runtime.enable");
-await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
+await send("Emulation.setDeviceMetricsOverride", { width: vw, height: vh, deviceScaleFactor: 2, mobile: false });
 await send("Page.navigate", { url });
 await new Promise(r => setTimeout(r, waitMs));
 if (evalJs) {
   const expr = evalJs.startsWith("@") ? readFileSync(evalJs.slice(1), "utf8") : evalJs;
   const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-  console.log("EVAL:", JSON.stringify(ev.result?.result?.value ?? ev.result?.exceptionDetails ?? ev.result, null, 1));
+  console.log("EVAL:", JSON.stringify(ev.result?.value ?? ev.result?.exceptionDetails ?? ev.result, null, 1));
   await new Promise(r => setTimeout(r, 800));
 }
 const shot = await send("Page.captureScreenshot", { format: "png" });
