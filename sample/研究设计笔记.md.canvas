@@ -1,0 +1,148 @@
+{
+  "nodes": [
+    {
+      "id": "doc",
+      "type": "file",
+      "file": "研究设计笔记.md",
+      "x": 0,
+      "y": 0,
+      "width": 560,
+      "height": 720
+    },
+    {
+      "id": "A-0001",
+      "type": "text",
+      "text": "**A-0001** · deprecated · w=0.00\n\n这个口径绝对不能再改，评审盯的就是这里。若要调整必须先问我。\n\n---\n锚点：「净利润为46%」",
+      "x": 760,
+      "y": 0,
+      "width": 360,
+      "height": 200,
+      "color": "#7d7a75"
+    },
+    {
+      "id": "A-0002",
+      "type": "text",
+      "text": "**A-0002** · deprecated · w=0.00\n\n样本量是全文的锚点，任何后续修改都不得与这个数字冲突。\n\n---\n锚点：「3,842 个门店—季度观测值」\n> [!warning] 与 A-0006 冲突，待裁定",
+      "x": 760,
+      "y": 240,
+      "width": 360,
+      "height": 200,
+      "color": "#7d7a75"
+    },
+    {
+      "id": "A-0003",
+      "type": "text",
+      "text": "**A-0003** · active · w=1.00\n\n关键词表引用来源缺失，需要补一条脚注。\n\n---\n锚点：「92 个词条」",
+      "x": 760,
+      "y": 480,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0004",
+      "type": "text",
+      "text": "**A-0004** · active · w=1.00\n\n聚类层级是否应提到行业×年份？待定，但不要再改回普通标准误。\n\n---\n锚点：「标准误在门店层面聚类调整」",
+      "x": 760,
+      "y": 720,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0005",
+      "type": "text",
+      "text": "**A-0005** · active · w=1.00\n\n这条口径我改主意了：整体口径必须含税，含税口径下这块业务的利润率要重新算。\n\n---\n锚点：「外卖业务板块的净利润为46%，远高于门店整体水平」\n> 替代 A-0001",
+      "x": 760,
+      "y": 960,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0006",
+      "type": "text",
+      "text": "**A-0006** · active · w=1.00\n\n样本量我需要再核对一遍，先别在正文引用这个数。\n\n---\n锚点：「3,842 个门店—季度观测值」\n> [!warning] 与 A-0002 冲突，待裁定",
+      "x": 760,
+      "y": 1200,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0007",
+      "type": "text",
+      "text": "**A-0007** · active · w=1.00\n\n图 3-1 的 Y 轴刻度标签糊了，让 Agent 重出一版矢量图，字体统一用正文衬线体\n\n---\n锚点：区域 (0.04, 0.08) · 配图-数字化与坪效.png",
+      "x": 760,
+      "y": 1440,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-A-0001",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0001",
+      "toSide": "left",
+      "label": "A-0001 deprecated",
+      "color": "#7d7a75"
+    },
+    {
+      "id": "e-A-0002",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0002",
+      "toSide": "left",
+      "label": "A-0002 deprecated",
+      "color": "#7d7a75"
+    },
+    {
+      "id": "e-A-0003",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0003",
+      "toSide": "left",
+      "label": "A-0003 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0004",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0004",
+      "toSide": "left",
+      "label": "A-0004 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0005",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0005",
+      "toSide": "left",
+      "label": "A-0005 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0006",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0006",
+      "toSide": "left",
+      "label": "A-0006 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0007",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0007",
+      "toSide": "left",
+      "label": "A-0007 active",
+      "color": "1"
+    }
+  ]
+}

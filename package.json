@@ -1,0 +1,24 @@
+{
+  "name": "marginalia",
+  "version": "0.4.0",
+  "description": "画布式本地文档批注层：批注编号、持久、永不删除，作为 Agent 修改文档前的约束规范",
+  "type": "module",
+  "bin": {
+    "marginalia": "./cli.mjs"
+  },
+  "scripts": {
+    "start": "node cli.mjs open ./sample"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "files": [
+    "cli.mjs",
+    "server.mjs",
+    "mcp-stdio.mjs",
+    "public/",
+    "README.md",
+    "LICENSE"
+  ]
+}

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Marginalia</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body class="focus-active">
+<aside id="rail">
+  <div class="rail-top">
+    <div class="brand">
+      <span class="mark"></span>
+      <span>Marginalia</span>
+    </div>
+    <div class="vault" id="vault"></div>
+  </div>
+  <div class="rail-scroll">
+    <div class="rail-label">文档</div>
+    <div id="tree" class="tree"></div>
+  </div>
+  <div class="rail-foot">
+    <div class="stat"><span id="stat-count">0</span> 条批注 · <span id="stat-active">0</span> 生效</div>
+    <div class="hint">Agent 读取：<code id="api-hint">/api/constraints</code></div>
+  </div>
+</aside>
+
+<main id="main">
+  <header id="bar">
+    <button id="rail-toggle" class="icon" title="收起侧栏">◧</button>
+    <div class="doc-title" id="docpath">未选择文档</div>
+    <div class="bar-tools">
+      <button id="btn-edit-ask" class="chip ask" title="按标注修改：组装完整修改指令（目标文件 + 逐条约束 + 标注图），一键复制给 Agent">按标注修改</button>
+      <button id="btn-layout" class="chip">整理布局</button>
+      <button id="btn-focus" class="chip" data-on="1">只看生效</button>
+      <button id="btn-lines" class="chip" data-on="0" title="连线降噪：开启后仅悬停/选中的批注显示牵引线">连线</button>
+      <button id="btn-drawer" class="chip">约束清单</button>
+      <button id="btn-export" class="chip" hidden>导出标注图</button>
+      <span class="divider"></span>
+      <button id="btn-out" class="icon" title="缩小">−</button>
+      <span id="zoom" class="zoom">100%</span>
+      <button id="btn-in" class="icon" title="放大">＋</button>
+      <button id="btn-fit" class="chip">适应</button>
+      <span class="divider"></span>
+      <button id="btn-theme" class="chip" title="切换纸张明暗">纸张</button>
+    </div>
+  </header>
+
+  <div id="viewport">
+    <div id="world">
+      <div id="page"><article id="doc"></article></div>
+      <svg id="lines" xmlns="http://www.w3.org/2000/svg"></svg>
+      <svg id="arrows" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="images-layer"></div>
+      <div id="drafts-layer"></div>
+      <div id="notes-layer"></div>
+      <div id="cards"></div>
+    </div>
+    <div id="toolbox">
+      <button class="tool active" data-tool="select" title="选择 / 平移 (V)">
+        <svg viewBox="0 0 20 20"><path d="M5 3 L15 10 L10.5 11.2 L12.8 16 L10.9 16.8 L8.6 12 L5.6 14.5 Z" fill="currentColor"/></svg>
+      </button>
+      <button class="tool" data-tool="arrow" title="标注箭头：按住拖画，松手即成（A）">
+        <svg viewBox="0 0 20 20"><path d="M3 15 Q 9 14, 14.5 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M11.4 6.4 L15.6 6.2 L14.2 10.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="tool" data-tool="note" title="便签：点击画布放置（N）">
+        <svg viewBox="0 0 20 20"><path d="M4 4 h12 v8 l-4 4 h-8 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 16 v-4 h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="tool" data-tool="image" title="贴图：选择图片 / 拖入 / 粘贴到画布（I）">
+        <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="7.2" cy="8" r="1.4" fill="currentColor"/><path d="M4 14 L9 9.5 L12.5 12.5 L15 10.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="tool-sep"></span>
+      <span class="swatches" id="swatches" title="箭头颜色">
+        <button class="swatch red active" data-color="red" title="红"></button>
+        <button class="swatch orange" data-color="orange" title="橙"></button>
+        <button class="swatch yellow" data-color="yellow" title="黄"></button>
+      </span>
+    </div>
+    <input type="file" id="file-input" accept="image/*" multiple hidden />
+    <div id="arrow-label-editor" hidden>
+      <input id="arrow-label-input" placeholder="给这条标注写句话…" maxlength="120" />
+      <div class="ale-hint">Enter 确认 · Esc 留空</div>
+    </div>
+    <div id="toast"></div>
+    <div id="empty">从左侧选择一个文档开始</div>
+    <div id="shortcut-help" hidden>
+      <div class="sh-card">
+        <div class="sh-head">快捷键 <button id="sh-close" class="icon">✕</button></div>
+        <table>
+          <tr><td><kbd>V</kbd></td><td>选择 / 平移</td></tr>
+          <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>
+          <tr><td><kbd>N</kbd></td><td>便签（点击画布放置）</td></tr>
+          <tr><td><kbd>I</kbd></td><td>贴图（也可拖图 / ⌘V 粘贴进画布）</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>回选择工具 / 取消输入</td></tr>
+          <tr><td><kbd>Delete</kbd></td><td>删除选中的箭头 / 便签 / 图卡 / 草稿卡</td></tr>
+          <tr><td>双击</td><td>改箭头标签 / 编辑便签</td></tr>
+          <tr><td>⌘+滚轮</td><td>缩放 · 拖拽空白处平移</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<aside id="drawer" hidden>
+  <div class="d-head">
+    <span>约束清单 · 交给 Agent 的修改前必读</span>
+    <button id="drawer-copy" class="chip">复制</button>
+    <button id="drawer-close" class="icon">✕</button>
+  </div>
+  <div id="drawer-body"></div>
+</aside>
+
+<div id="composer" hidden>
+  <div class="c-quote" id="composer-quote"></div>
+  <textarea id="composer-input" rows="3" placeholder="写下这条批注 —— 它会永久保留并编号，成为 Agent 的约束"></textarea>
+  <div class="c-foot">
+    <span class="c-tip">⌘/Ctrl + Enter 保存</span>
+    <div>
+      <button id="composer-cancel" class="ghost">取消</button>
+      <button id="composer-save" class="primary">保存批注</button>
+    </div>
+  </div>
+</div>
+
+<script>
+window.addEventListener("error", (e) => {
+  const t = document.getElementById("toast");
+  if (t) { t.textContent = "JS错误: " + e.message + " @" + (e.filename||"") + ":" + (e.lineno||""); t.className = "show err"; }
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const t = document.getElementById("toast");
+  if (t) { t.textContent = "Promise拒绝: " + String(e.reason && e.reason.message || e.reason); t.className = "show err"; }
+});
+</script>
+<script type="module" src="/pdf-layer.mjs"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+{
+  "nodes": [
+    {
+      "id": "doc",
+      "type": "file",
+      "file": "配图-数字化与坪效.png",
+      "x": 0,
+      "y": 0,
+      "width": 560,
+      "height": 720
+    },
+    {
+      "id": "A-0001",
+      "type": "text",
+      "text": "**A-0001** · active · w=1.00\n\nQ7 这组柱子颜色太重，降一档饱和度\n\n---\n锚点：区域 (0.72, 0.10)",
+      "x": 760,
+      "y": 0,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0002",
+      "type": "text",
+      "text": "**A-0002** · active · w=1.00\n\n注的文字太小，正文里至少要 10pt\n\n---\n锚点：区域 (0.05, 0.86)",
+      "x": 760,
+      "y": 240,
+      "width": 360,
+      "height": 200,
+      "color": "1"
+    },
+    {
+      "id": "A-0003",
+      "type": "text",
+      "text": "**A-0003** · deprecated · w=1.00\n\n回归测试-待删\n\n---\n锚点：区域 (0.30, 0.40)",
+      "x": 760,
+      "y": 480,
+      "width": 360,
+      "height": 200,
+      "color": "#7d7a75"
+    },
+    {
+      "id": "N-0003",
+      "type": "text",
+      "text": "**N-0003** · 便签\n\n记得补一版矢量重绘，Q3 柱子单独说",
+      "x": 1200,
+      "y": 0,
+      "width": 280,
+      "height": 160,
+      "color": "6"
+    },
+    {
+      "id": "AR-0001",
+      "type": "text",
+      "text": "**AR-0001** · 箭头标签（orange）\n\n「这里是重点」",
+      "x": 1200,
+      "y": 200,
+      "width": 280,
+      "height": 120,
+      "color": "2"
+    },
+    {
+      "id": "AR-0002",
+      "type": "text",
+      "text": "**AR-0002** · 箭头标签（red）\n\n「这张图的口径不对」",
+      "x": 1200,
+      "y": 360,
+      "width": 280,
+      "height": 120,
+      "color": "2"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-A-0001",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0001",
+      "toSide": "left",
+      "label": "A-0001 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0002",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0002",
+      "toSide": "left",
+      "label": "A-0002 active",
+      "color": "1"
+    },
+    {
+      "id": "e-A-0003",
+      "fromNode": "doc",
+      "fromSide": "right",
+      "toNode": "A-0003",
+      "toSide": "left",
+      "label": "A-0003 deprecated",
+      "color": "#7d7a75"
+    }
+  ]
+}
