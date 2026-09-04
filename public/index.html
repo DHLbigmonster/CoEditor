@@ -19,7 +19,7 @@
     <button id="btn-vault" class="ghost" title="像 VSCode 一样打开另一个本地文件夹">打开文件夹…</button>
   </div>
   <div class="rail-scroll">
-    <div class="rail-label">文档</div>
+    <div class="rail-label"><span>文档</span><button id="btn-new-file" title="新建文档（Markdown / TXT / HTML）">＋</button></div>
     <div id="tree" class="tree"></div>
   </div>
   <div class="rail-foot">
@@ -39,8 +39,6 @@
         <button data-workspace-mode="edit">编辑</button>
         <button data-workspace-mode="canvas">画布</button>
       </span>
-      <button id="btn-round" class="chip" title="明确结束本轮批注，并开启下一轮；外部文件变化不会自动推进轮次">完成本轮批注</button>
-      <button id="btn-edit-ask" class="chip ask" title="汇总当前批注与画布箭头，生成可交给 Agent 的修改任务">交给 Agent</button>
       <button id="btn-drawer" class="chip">批注</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
@@ -61,6 +59,9 @@
           <button id="btn-focus" class="menu-action" data-on="1">批注：当前</button>
           <button id="btn-lines" class="menu-action" data-on="0" title="自动时只显示当前批注的连接线">连接线：自动</button>
           <button id="btn-theme" class="menu-action" title="切换纸张明暗">纸张：明亮</button>
+          <span class="menu-sep"></span>
+          <button id="btn-edit-ask" class="menu-action" title="汇总当前批注与画布箭头，复制为可粘贴给任何 Agent 的修改指令（接了 MCP 的 Agent 会自己读取，不需要此步）">复制修改指令给 Agent</button>
+          <button id="btn-round" class="menu-action" title="把当前批注整体归档为一个历史批次，新批注进入下一批次编号">归档本轮，开新批次</button>
         </div>
       </details>
     </div>
@@ -133,6 +134,20 @@
   </div>
   <div id="drawer-body"></div>
 </aside>
+
+<div id="new-file-pop" hidden>
+  <div class="nf-title">新建文档</div>
+  <div class="nf-formats">
+    <button type="button" data-nf-ext=".md" class="active">Markdown</button>
+    <button type="button" data-nf-ext=".txt">TXT</button>
+    <button type="button" data-nf-ext=".html">HTML</button>
+  </div>
+  <input id="nf-name" placeholder="文件名（可不写后缀）" maxlength="80" autocomplete="off" />
+  <div class="nf-foot">
+    <span class="nf-tip">创建在当前文件夹根目录</span>
+    <button id="nf-create" class="primary">创建并打开</button>
+  </div>
+</div>
 
 <div id="sel-menu" hidden>
   <button data-sel-act="comment" title="写批注（保留编号，成为 Agent 约束）">批注</button>

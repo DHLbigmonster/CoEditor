@@ -78,11 +78,25 @@ const TOOLS = [
   {
     name: "get_active_constraints",
     description:
-      "【修改文档前必调】获取指定文档当前使用的人类批注约束，按权重降序。任何对该文档的修改都必须先遵守这些约束；无法满足时应向用户说明而不是绕过。",
+      "【修改文档前必调】获取指定文档当前待处理的人类批注约束（status=active 即人新增、还没被处理的），按权重降序。任何对该文档的修改都必须先遵守这些约束；无法满足时应向用户说明而不是绕过。",
     inputSchema: {
       type: "object",
       properties: { doc: { type: "string", description: "文档相对路径" } },
       required: ["doc"],
+    },
+  },
+  {
+    name: "resolve_annotations",
+    description:
+      "【处理完批注后必调】把已处理完成的批注标记为「已处理」：网页里会自动灰显归档、退出约束清单，人不用再点任何按钮。只标记你确实已经处理或回应过的条目；存疑或未做的保持 active 并向用户说明。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc: { type: "string", description: "文档相对路径" },
+        ids: { type: "array", items: { type: "string" }, description: "批注显示编号（如 0-1、0-2）或内部 ID" },
+        note: { type: "string", description: "可选：一句话说明处理方式，记入批注历史" },
+      },
+      required: ["doc", "ids"],
     },
   },
   {
@@ -284,7 +298,7 @@ async function callTool(name, args = {}) {
       return {
         doc: args.doc,
         count: list.length + canvas.arrows.length,
-        rule: "以下为人类留下的当前约束，修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。",
+        rule: "以下为人类留下的当前约束（status=active = 人新增、待处理），修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。全部处理完成后调用 resolve_annotations 逐条标记，网页会自动将其灰显归档，无需人再操作。",
         constraints: list.map((item) => {
           const briefItem = brief(item);
           briefItem.conflicts_with = item.live_conflicts || [];
@@ -312,6 +326,34 @@ async function callTool(name, args = {}) {
       const item = (await loadAnnotations(args.doc)).find((entry) => entry.id === args.id || entry.no === args.id);
       if (!item) throw new Error(`annotation ${args.id} not found`);
       return item;
+    }
+    case "resolve_annotations": {
+      const data = await loadSidecar();
+      const list = data.docs[args.doc] || [];
+      const wanted = (Array.isArray(args.ids) ? args.ids : [args.ids]).map((v) => String(v || "").trim()).filter(Boolean);
+      const resolved = [];
+      const skipped = [];
+      for (const key of wanted) {
+        const item = list.find((entry) => entry.id === key || entry.no === key);
+        if (!item) { skipped.push({ id: key, reason: "not-found" }); continue; }
+        if (item.status !== "active") { skipped.push({ id: key, reason: `already-${item.status}` }); continue; }
+        item.status = "addressed";
+        item.weight = Math.min(Number(item.weight ?? 1), 0.5);
+        item.history = item.history || [];
+        item.history.push({
+          event: "resolved_by_agent",
+          note: typeof args.note === "string" ? args.note.slice(0, 200) : "",
+          at: new Date().toISOString(),
+        });
+        resolved.push(item.no || item.id);
+      }
+      if (resolved.length) await saveSidecar(data);
+      return {
+        doc: args.doc,
+        resolved,
+        skipped,
+        note: "已处理的批注在网页中自动灰显归档、退出约束清单；未在被标记之列的仍是 active。人无需再点任何按钮。",
+      };
     }
     case "insert_asset": {
       const { writeFile, mkdir } = await import("node:fs/promises");
@@ -462,7 +504,7 @@ async function handleRequest(message) {
       return {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "coeditor", version: "0.8.1" },
+        serverInfo: { name: "coeditor", version: "0.9.2" },
       };
     }
     if (message.method === "tools/list") {

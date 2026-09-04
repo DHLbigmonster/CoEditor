@@ -978,6 +978,11 @@ body.round-only .card[data-round-cur="0"]:hover { opacity: .85; }
 #md-editor .CodeMirror-activeline-background { background: rgba(238, 107, 80, .05); }
 #md-editor .CodeMirror-cursor { border-left: 2px solid #ee6b50; }
 #md-editor .CodeMirror-selected { background: rgba(238, 107, 80, .14) !important; }
+.CodeMirror-linebackground.coeditor-source-flash {
+  background: linear-gradient(90deg, rgba(238, 107, 80, .17), rgba(238, 107, 80, .04)) !important;
+  animation: source-flash 1s ease-out;
+}
+@keyframes source-flash { from { opacity: .65; } to { opacity: 1; } }
 /* CM 行元素是 pre，屏蔽 #doc pre 的全局样式误伤 */
 #md-editor .CodeMirror pre.CodeMirror-line,
 #md-editor .CodeMirror pre {
@@ -1094,3 +1099,50 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
   font: 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
 }
 .drawer-edit:focus { box-shadow: 0 0 0 2px rgba(238, 107, 80, .28); }
+
+/* ---------- v0.9.2：侧栏新建入口 + 已处理灰显 + PPT 工作流向导 ---------- */
+.rail-label { display: flex; align-items: center; justify-content: space-between; }
+#btn-new-file {
+  border: 0; border-radius: 7px; width: 22px; height: 22px; line-height: 1;
+  background: rgba(74, 62, 45, .07); color: var(--ink-dim); font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+#btn-new-file:hover { background: rgba(238, 107, 80, .16); color: var(--active); }
+
+#new-file-pop {
+  position: fixed; z-index: 90; left: 18px; top: 210px; width: 236px; padding: 14px;
+  background: rgba(255, 254, 250, .98); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow-deep); backdrop-filter: blur(20px);
+}
+.nf-title { font-size: 12.5px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+.nf-formats { display: flex; gap: 5px; margin-bottom: 10px; }
+.nf-formats button {
+  flex: 1; border: 0; border-radius: 8px; padding: 5px 0; font-size: 11.5px; cursor: pointer;
+  background: rgba(74, 62, 45, .06); color: var(--ink-dim);
+}
+.nf-formats button.active { background: rgba(238, 107, 80, .15); color: var(--active); font-weight: 600; }
+#nf-name {
+  width: 100%; border: 1px solid transparent; border-radius: 9px; outline: 0;
+  background: #f3efe7; color: var(--ink); padding: 8px 10px; font-size: 12.5px;
+}
+#nf-name:focus { box-shadow: 0 0 0 2px rgba(238, 107, 80, .28); }
+.nf-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.nf-tip { font-size: 10.5px; color: var(--ink-faint); }
+.nf-foot .primary {
+  border: 0; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  background: var(--active); color: #fff; font-size: 12px;
+}
+
+.menu-sep { display: block; height: 1px; margin: 6px 4px; background: var(--line); }
+
+/* 已处理 = 人不用再管：抽屉里同样淡化（不划线，区别于过期/移除） */
+.d-item[data-status="addressed"] { opacity: .6; }
+.d-item[data-status="addressed"] .d-item-quote { color: var(--ink-faint); }
+
+/* PPTX 刻意不内嵌渲染：给出人可执行的批注闭环动线 */
+.pptx-guide { max-width: 560px; margin: 0 auto; padding: 56px 28px; }
+.pptx-guide .pg-title { font-size: 16px; font-weight: 600; color: var(--paper-ink); margin: 0 0 18px; }
+.pptx-guide .pg-steps { margin: 0 0 16px; padding-left: 22px; color: var(--paper-ink); }
+.pptx-guide .pg-steps li { font-size: 13px; line-height: 1.9; margin-bottom: 8px; }
+.pptx-guide .pg-steps b { color: var(--active); font-weight: 600; }
+.pptx-guide .pg-note { font-size: 11.5px; color: var(--paper-ink-dim); line-height: 1.8; border-top: 1px dashed var(--line); padding-top: 12px; }

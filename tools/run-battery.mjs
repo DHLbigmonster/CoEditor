@@ -46,9 +46,12 @@ const server = spawn(process.execPath, [path.join(ROOT, "server.mjs"), VAULT], {
 });
 let ready = false;
 for (let i = 0; i < 30; i += 1) {
-  try { await (await fetch(`${BASE}/api/tree`)).json(); ready = true; break; } catch { await sleep(300); }
+  try {
+    const tree = await (await fetch(`${BASE}/api/tree`)).json();
+    if (tree.root === VAULT) { ready = true; break; } // 必须是「我们的」服务：端口残留实例的 root 不符
+  } catch { await sleep(300); }
 }
-if (!ready) { console.error("❌ 隔离服务启动失败"); process.exit(2); }
+if (!ready) { console.error(`❌ 隔离服务启动失败（端口 ${PORT} 被其他实例占用或 root 不符）`); server.kill(); process.exit(2); }
 console.log(`\n🧪 CoEditor 测试电池 → ${BASE}（vault: ${VAULT}）\n`);
 
 // 套件清单：[名称, 脚本, 通过判据(对 stdout 的正则数组, 条数为出现次数下限)]
@@ -61,6 +64,7 @@ const suites = [
   ["HTML 双击直改：写回纯净 + 批注重锚定", "eval-html-inline-edit.mjs", [["panelShown\": true", 1], ["fileHasNewText\": true", 1], ["noRawUrl\": true", 1], ["annotationReanchored\": true", 1], ["restored\": true", 1]]],
   ["vault 切换守卫：不虚推进批次", "eval-vault-guard.mjs", [["guardWorked\": true", 1]]],
   ["v0.9：树折叠 / 批注编辑删除 / 图片区域防重复", "eval-v09.mjs", [["treeCollapsed\": true", 1], ["visibleNoPattern\": true", 1], ["displayNoMatchesApi\": true", 1], ["editOpened\": true", 1], ["editPersisted\": true", 1], ["deletePersisted\": true", 1], ["oneRegionCreated\": true", 1], ["oneRegionBox\": true", 1], ["oneRegionLine\": true", 1], ["canvasDeleteWorked\": true", 1]]],
+  ["v0.9.2：新建文档 / 成品定位源码 / MCP resolve 闭环 / 顶栏减负", "eval-v092.mjs", [["apiCreated\": true", 1], ["dupBlocked\": true", 1], ["traversalSanitized\": true", 1], ["resolveMarked\": true", 1], ["constraintsDropped\": true", 1], ["editSplitShown\": true", 1], ["clickLocated\": true", 1], ["selectionLocated\": true", 1], ["uiCreated\": true", 1], ["uiEditOpened\": true", 1], ["topbarLean\": true", 1]]],
 ];
 
 const results = [];

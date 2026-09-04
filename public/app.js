@@ -771,6 +771,7 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
 /* ---------------- 按标注修改（Cowart 式一键委托，泛化到所有文档类型） ---------------- */
 async function askEditWithAnnotations() {
   if (!state.path) return toast("先打开一个文档");
+  $("view-menu").open = false;
   let screenshotRel = null;
   if (state.mode === "image" && $("image-node")) {
     const listed = state.annotations.filter((item) => item.region && item.status !== "deprecated" && (!item.image || item.image === state.path));
@@ -1530,9 +1531,14 @@ async function renderDocument() {
   }
   if (state.mode === "pptx") {
     host.innerHTML = `
-      <div style="padding:60px 40px;text-align:center">
-        <p style="font-size:15px;margin-bottom:10px">PPT 预览暂不支持</p>
-        <p style="font-size:12.5px;color:var(--ink-faint);line-height:1.9">pptx 渲染需要引入重量级依赖（违背零依赖原则）。<br/>当前可直接用「打开批注」为 PPT 截图/导出图做区域批注，批注同样进入约束体系。</p>
+      <div class="pptx-guide">
+        <p class="pg-title">PPT 不在这里渲染 —— 用批注闭环来改它</p>
+        <ol class="pg-steps">
+          <li><b>把要改的幻灯片截图（或导出 PNG）放进这个文件夹</b>，打开图片用「区域批注」圈出位置、写下要求；批注照常编号并进入约束。</li>
+          <li><b>直接对 Agent 说「按批注改这个 PPT」</b>：Agent 读取约束后用脚本改 .pptx（改文字、删页、换图），新版本放在原文件旁边，绝不覆盖原件。</li>
+          <li>让 Agent 把改后关键页导出 PNG 放上画布，与原图并排验收。</li>
+        </ol>
+        <p class="pg-note">不内嵌 PPT 编辑器是刻意取舍：内嵌渲染要引入重量级依赖，且重排版式几乎必然跑版。文字级小修改交给 Agent 更可靠。</p>
       </div>`;
     state.text = "";
     return;
@@ -1908,6 +1914,8 @@ document.addEventListener("mousedown", (event) => {
   if (!menu.hidden && !menu.contains(event.target)) hideSelMenu();
   const viewMenu = $("view-menu");
   if (viewMenu && viewMenu.open && !viewMenu.contains(event.target)) viewMenu.open = false;
+  const pop = $("new-file-pop");
+  if (pop && !pop.hidden && !pop.contains(event.target) && event.target !== $("btn-new-file")) pop.hidden = true;
 });
 
 $("sel-menu").addEventListener("mousedown", (event) => event.stopPropagation());
@@ -1988,6 +1996,102 @@ $("composer-input").addEventListener("keydown", (event) => {
 /* ---------------- 文本编辑模式（Markdown / HTML 源码） ---------------- */
 let editSession = null; // { textarea, bar, baseMtime }
 
+function htmlSourceNeedles(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return [];
+  const escaped = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  return [...new Set([raw, escaped])];
+}
+
+function nearestSourceOccurrence(source, needles, nearIndex) {
+  let best = null;
+  for (const needle of needles) {
+    let index = source.indexOf(needle);
+    while (index >= 0) {
+      const candidate = { index, length: needle.length, distance: Math.abs(index - nearIndex) };
+      if (!best || candidate.distance < best.distance) best = candidate;
+      index = source.indexOf(needle, index + Math.max(1, needle.length));
+    }
+  }
+  return best;
+}
+
+function sourceOpeningTagIndex(source, element) {
+  if (!element || !element.tagName) return -1;
+  const tag = element.tagName.toLowerCase();
+  const id = element.getAttribute("id");
+  if (id) {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const exact = new RegExp(`<${tag}\\b[^>]*\\bid=["']${escapedId}["'][^>]*>`, "i").exec(source);
+    if (exact) return exact.index;
+  }
+  const doc = element.ownerDocument;
+  const ordinal = [...doc.querySelectorAll(tag)].indexOf(element);
+  if (ordinal < 0) return -1;
+  const matcher = new RegExp(`<${tag}(?=[\\s>/])`, "ig");
+  let match; let seen = -1;
+  while ((match = matcher.exec(source))) {
+    seen += 1;
+    if (seen === ordinal) return match.index;
+  }
+  return -1;
+}
+
+function flashCodeMirrorLine(cm, line) {
+  cm.addLineClass(line, "background", "coeditor-source-flash");
+  clearTimeout(cm.__coeditorFlashTimer);
+  cm.__coeditorFlashTimer = setTimeout(() => cm.removeLineClass(line, "background", "coeditor-source-flash"), 1000);
+}
+
+function revealPreviewInSource(cm, frame, target, selectedText = "") {
+  const source = cm.getValue();
+  const cursorIndex = cm.indexFromPos(cm.getCursor());
+  const selectionHit = nearestSourceOccurrence(source, htmlSourceNeedles(selectedText), cursorIndex);
+  if (selectionHit) {
+    const from = cm.posFromIndex(selectionHit.index);
+    const to = cm.posFromIndex(selectionHit.index + selectionHit.length);
+    cm.setSelection(from, to);
+    cm.scrollIntoView({ from, to }, 100);
+    flashCodeMirrorLine(cm, from.line);
+    cm.focus();
+    return true;
+  }
+  let mapped = target && target.nodeType === 1 ? target : target?.parentElement;
+  while (mapped && mapped !== frame.contentDocument.documentElement && !mapped.hasAttribute("data-coedit")) mapped = mapped.parentElement;
+  const index = sourceOpeningTagIndex(source, mapped);
+  if (index < 0) return false;
+  const pos = cm.posFromIndex(index);
+  cm.setCursor(pos);
+  cm.scrollIntoView(pos, 100);
+  flashCodeMirrorLine(cm, pos.line);
+  cm.focus();
+  return true;
+}
+
+function bindHtmlPreviewSourceSync(cm, frame) {
+  const bind = () => {
+    const inner = frame.contentDocument;
+    if (!inner || inner.documentElement.dataset.coeditorSourceSync === "1") return;
+    inner.documentElement.dataset.coeditorSourceSync = "1";
+    inner.addEventListener("mouseup", (event) => {
+      const selected = String(frame.contentWindow.getSelection()).trim();
+      if (selected) revealPreviewInSource(cm, frame, event.target, selected);
+    });
+    inner.addEventListener("click", (event) => {
+      event.preventDefault(); // 成品区用于定位源码：链接跳转与表单提交一律拦下，防止预览被自己导航走
+      if (String(frame.contentWindow.getSelection()).trim()) return;
+      revealPreviewInSource(cm, frame, event.target);
+    });
+  };
+  frame.addEventListener("load", bind);
+  if (frame.contentDocument?.readyState === "complete") bind();
+}
+
 $("page").addEventListener("dblclick", (event) => {
   if (!isEditableDocument()) return;
   if (document.body.classList.contains("editing-doc")) return;
@@ -2046,7 +2150,7 @@ function enterEditMode() {
   const bar = document.createElement("div");
   bar.id = "edit-bar";
   bar.innerHTML = `
-    <span class="eb-hint">编辑模式 · ${/\.html?$/i.test(state.path || "") ? "HTML" : "Markdown / 文本"} 源码 · 保存后批注自动重新锚定</span>
+    <span class="eb-hint">${/\.html?$/i.test(state.path || "") ? "左侧源码 · 右侧成品（点或拖选成品可定位源码）" : "编辑模式 · Markdown / 文本"} · 保存后批注自动重新锚定</span>
     <button id="edit-save" class="primary">保存 ⌘S</button>
     <button id="edit-cancel" class="ghost">返回阅读</button>`;
   $("page").prepend(bar);
@@ -2089,6 +2193,7 @@ function enterEditMode() {
   setTimeout(() => cm.refresh(), 80);
   if (isHtmlEdit && previewFrame) {
     const renderPreview = () => { previewFrame.srcdoc = htmlPreviewOnly(cm.getValue()); };
+    bindHtmlPreviewSourceSync(cm, previewFrame);
     renderPreview();
     cm.on("change", () => {
       clearTimeout(previewTimer);
@@ -2444,6 +2549,7 @@ $("btn-round").addEventListener("click", async () => {
   });
   if (!res.ok) return toast("保存批次失败");
   const data = await res.json();
+  $("view-menu").open = false;
   await loadAnnotations();
   renderDrawer();
   toast(`本轮 R${data.closed} 已归档，新批注进入 R${data.activeRound}`);
@@ -2533,6 +2639,48 @@ $("fs-up").addEventListener("click", () => { if (fsState.up) fsLoad(fsState.up);
 $("fs-open").addEventListener("click", async () => {
   if (!fsState.cur) return;
   await switchVault(fsState.cur);
+});
+
+/* ---------------- 侧栏「＋」新建文档：选格式 → 起名 → 创建并直接进入编辑 ---------------- */
+let nfExt = ".md";
+$("btn-new-file").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const pop = $("new-file-pop");
+  pop.hidden = !pop.hidden;
+  if (!pop.hidden) { $("nf-name").value = ""; $("nf-name").focus(); }
+});
+document.querySelectorAll("#new-file-pop [data-nf-ext]").forEach((button) => {
+  button.addEventListener("click", () => {
+    nfExt = button.dataset.nfExt;
+    document.querySelectorAll("#new-file-pop [data-nf-ext]").forEach((b) => b.classList.toggle("active", b === button));
+    $("nf-name").focus();
+  });
+});
+async function createNewFile() {
+  const input = $("nf-name");
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const res = await fetch("/api/create-file", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, ext: nfExt }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    toast(data.error === "exists" ? `已存在 ${data.rel || "同名文件"}，换个名字` : "创建失败，请检查文件名");
+    return;
+  }
+  $("new-file-pop").hidden = true;
+  await loadTree();
+  await openDoc(data.rel);
+  setWorkspaceMode("edit");
+  toast(`已创建 ${data.rel}，直接开始写`);
+}
+$("nf-create").addEventListener("click", createNewFile);
+$("nf-name").addEventListener("keydown", (event) => {
+  event.stopPropagation();
+  if (event.key === "Enter") createNewFile();
+  if (event.key === "Escape") $("new-file-pop").hidden = true;
 });
 
 /* ---------------- 外部修改感知：只重新锚定，不自动推进批次 ---------------- */
