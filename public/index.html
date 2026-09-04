@@ -113,6 +113,7 @@
         <div class="sh-head">快捷键 <button id="sh-close" class="icon">✕</button></div>
         <table>
           <tr><td>阅读 / 编辑</td><td>Markdown、HTML 可切换源码编辑（⌘S 保存）</td></tr>
+          <tr><td>双击 HTML 段落</td><td>直接改文字（阅读模式，写回源文件，URL 与脚本原样保留）</td></tr>
           <tr><td>选中文字</td><td>弹出菜单：批注 / 高亮 / 删除线</td></tr>
           <tr><td><kbd>V</kbd></td><td>选择 / 平移</td></tr>
           <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>
@@ -153,6 +154,21 @@
     <div>
       <button id="composer-cancel" class="ghost">取消</button>
       <button id="composer-save" class="primary">保存批注</button>
+    </div>
+  </div>
+</div>
+
+<div id="html-edit" hidden>
+  <div class="he-head">
+    <span>直接编辑 <code id="html-edit-tag">p</code></span>
+    <button id="html-edit-close" class="icon">✕</button>
+  </div>
+  <textarea id="html-edit-input" rows="4"></textarea>
+  <div class="c-foot">
+    <span class="c-tip">改文字写回源文件 · 嵌套结构请用「编辑」源码模式</span>
+    <div>
+      <button id="html-edit-cancel" class="ghost">取消</button>
+      <button id="html-edit-save" class="primary">保存</button>
     </div>
   </div>
 </div>

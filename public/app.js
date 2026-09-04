@@ -190,35 +190,18 @@ function rewriteCssAssets(css) {
 }
 
 /* HTML 在隔离 iframe 中按原网页渲染。保留 CSS 与布局，不允许脚本触碰 CoEditor。 */
-function htmlPreviewSource(source) {
-  const parsed = new DOMParser().parseFromString(source, "text/html");
-  parsed.querySelectorAll("script").forEach((node) => node.remove());
-  parsed.querySelectorAll("*").forEach((node) => {
-    for (const attr of [...node.attributes]) {
-      if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
-    }
-    for (const name of ["src", "href", "poster"]) {
-      if (node.hasAttribute(name)) node.setAttribute(name, htmlAssetUrl(node.getAttribute(name)));
-    }
-    if (node.hasAttribute("srcset")) {
-      node.setAttribute("srcset", node.getAttribute("srcset").split(",").map((part) => {
-        const [url, descriptor] = part.trim().split(/\s+/, 2);
-        return `${htmlAssetUrl(url)}${descriptor ? ` ${descriptor}` : ""}`;
-      }).join(", "));
-    }
-    if (node.hasAttribute("style")) node.setAttribute("style", rewriteCssAssets(node.getAttribute("style")));
-  });
-  parsed.querySelectorAll("style").forEach((node) => { node.textContent = rewriteCssAssets(node.textContent); });
-  const guard = parsed.createElement("style");
-  guard.textContent = `html{background:#fff;color-scheme:light} body{min-height:100vh}
-    ::selection{background:rgba(239,107,78,.24)}
-    .anchor{background:rgba(239,107,78,.16);box-shadow:inset 0 -2px 0 rgba(239,107,78,.72);border-radius:2px;cursor:pointer}
-    .anchor[data-kind="highlight"]{background:rgba(246,211,91,.44);box-shadow:none}
-    .anchor[data-kind="strike"]{background:rgba(239,107,78,.08);box-shadow:none;text-decoration:line-through;text-decoration-color:rgba(220,83,64,.9);text-decoration-thickness:2px}
-    .anchor[data-status="deprecated"]{opacity:.45}`;
-  parsed.head.appendChild(guard);
-  return `<!doctype html>${parsed.documentElement.outerHTML}`;
+/* HTML 双树：original 保真（脚本与原 URL 不动，负责写回源文件）；
+   preview 供 iframe 渲染（脚本中和、资源改写、带 data-coedit 路径标记映射回 original）。 */
+let htmlCoedit = null; // { original, map: Map<path, Element> }
+
+function assignCoeditIds(previewEl, originalEl, path, map) {
+  map.set(path, originalEl);
+  previewEl.setAttribute("data-coedit", path);
+  const pv = [...previewEl.children];
+  const og = [...originalEl.children];
+  pv.forEach((child, i) => { if (og[i]) assignCoeditIds(child, og[i], `${path}.${i}`, map); });
 }
+
 
 function annotationRoot() {
   const frame = $("html-frame");
@@ -1478,6 +1461,7 @@ async function renderDocument() {
     frame.sandbox = "allow-same-origin"; // 同源仅用于选择文字；未开放脚本执行
     frame.referrerPolicy = "no-referrer";
     host.appendChild(frame);
+    htmlCoedit = buildHtmlCoedit(state.text);
     await new Promise((resolve) => {
       frame.addEventListener("load", () => {
         const resize = () => {
@@ -1494,10 +1478,12 @@ async function renderDocument() {
         bindHtmlSelection(frame);
         resolve();
       }, { once: true });
-      frame.srcdoc = htmlPreviewSource(state.text);
+      frame.srcdoc = htmlCoedit.html;
     });
+    bindHtmlInlineEdit(frame);
     return;
   }
+  htmlCoedit = null;
   host.innerHTML = renderMarkdown(state.text);
 }
 
@@ -1667,6 +1653,113 @@ function clearTextSelections() {
   const frame = $("html-frame");
   if (frame && frame.contentWindow) frame.contentWindow.getSelection().removeAllRanges();
 }
+
+/* 从源文件构建双树：original 保真写回；preview 中和脚本 + 改写资源 + 标注 coedit 路径 */
+function buildHtmlCoedit(source) {
+  const original = new DOMParser().parseFromString(source, "text/html");
+  const preview = new DOMParser().parseFromString(source, "text/html");
+  preview.querySelectorAll("script").forEach((node) => {
+    const holder = preview.createElement("template");
+    holder.setAttribute("data-coeditor-script", "neutralized");
+    node.replaceWith(holder); // 占位保结构，脚本不执行
+  });
+  preview.querySelectorAll("*").forEach((node) => {
+    for (const attr of [...node.attributes]) {
+      if (/^on/i.test(attr.name) || attr.name === "data-coedit") node.removeAttribute(attr.name);
+    }
+    for (const name of ["src", "href", "poster"]) {
+      if (node.hasAttribute(name)) node.setAttribute(name, htmlAssetUrl(node.getAttribute(name)));
+    }
+    if (node.hasAttribute("srcset")) {
+      node.setAttribute("srcset", node.getAttribute("srcset").split(",").map((part) => {
+        const [url, descriptor] = part.trim().split(/\s+/, 2);
+        return `${htmlAssetUrl(url)}${descriptor ? ` ${descriptor}` : ""}`;
+      }).join(", "));
+    }
+    if (node.hasAttribute("style")) node.setAttribute("style", rewriteCssAssets(node.getAttribute("style")));
+  });
+  preview.querySelectorAll("style").forEach((node) => { node.textContent = rewriteCssAssets(node.textContent); });
+  const map = new Map();
+  assignCoeditIds(preview.documentElement, original.documentElement, "0", map);
+  const guard = preview.createElement("style");
+  guard.textContent = `html{background:#fff;color-scheme:light} body{min-height:100vh}
+    ::selection{background:rgba(239,107,78,.24)}
+    .anchor{background:rgba(239,107,78,.16);box-shadow:inset 0 -2px 0 rgba(239,107,78,.72);border-radius:2px;cursor:pointer}
+    .anchor[data-kind="highlight"]{background:rgba(246,211,91,.44);box-shadow:none}
+    .anchor[data-kind="strike"]{background:rgba(239,107,78,.08);box-shadow:none;text-decoration:line-through;text-decoration-color:rgba(220,83,64,.9);text-decoration-thickness:2px}
+    .anchor[data-status="deprecated"]{opacity:.45}`;
+  preview.head.appendChild(guard);
+  return { html: `<!doctype html>${preview.documentElement.outerHTML}`, original, map };
+}
+
+/* 点击元素直接改文字：双击纯文本元素 → 浮动编辑面板 → 保存映射回 original 树写回源文件 */
+let htmlEditTarget = null;
+
+function bindHtmlInlineEdit(frame) {
+  const inner = frame.contentDocument;
+  if (!inner || !inner.body) return;
+  inner.addEventListener("dblclick", (event) => {
+    if (state.workspaceMode !== "read") return;
+    let editable = null;
+    let cursor = event.target;
+    for (let hop = 0; cursor && cursor.nodeType === 1 && hop < 5; hop += 1) {
+      const kids = [...cursor.childNodes];
+      const plain = kids.length > 0 && kids.every((n) => n.nodeType === 3 || (n.nodeType === 1 && n.matches("mark.anchor")));
+      if (plain) { editable = cursor; break; }
+      const down = [...cursor.children].find((c) => c === event.target || c.contains(event.target));
+      if (down && down !== cursor) { cursor = down; continue; }
+      break;
+    }
+    hideSelMenu();
+    pending = null;
+    clearTextSelections();
+    if (!editable || !editable.getAttribute("data-coedit") || !editable.textContent.trim()) {
+      toast("这里含嵌套结构，改文字请切「编辑」模式用源码");
+      return;
+    }
+    htmlEditTarget = editable;
+    const text = editable.textContent;
+    $("html-edit-tag").textContent = `<${editable.tagName.toLowerCase()}>`;
+    $("html-edit-input").value = text;
+    const panel = $("html-edit");
+    panel.hidden = false;
+    panel.style.top = `${Math.min(event.clientY + 12, window.innerHeight - 200)}px`;
+    panel.style.left = `${Math.min(event.clientX, window.innerWidth - 390)}px`;
+    $("html-edit-input").focus();
+  });
+}
+
+function closeHtmlEdit() {
+  $("html-edit").hidden = true;
+  htmlEditTarget = null;
+}
+
+$("html-edit-close").addEventListener("click", closeHtmlEdit);
+$("html-edit-cancel").addEventListener("click", closeHtmlEdit);
+
+$("html-edit-save").addEventListener("click", async () => {
+  if (!htmlEditTarget || !htmlCoedit) return;
+  const path = htmlEditTarget.getAttribute("data-coedit");
+  const originalEl = htmlCoedit.map.get(path);
+  const nextText = $("html-edit-input").value;
+  if (!originalEl) { toast("映射已失效，请刷新后重试"); closeHtmlEdit(); return; }
+  if (originalEl.textContent === nextText) { closeHtmlEdit(); return; }
+  originalEl.textContent = nextText;
+  const next = `<!doctype html>${htmlCoedit.original.documentElement.outerHTML}`;
+  const res = await fetch(`/api/write?p=${encodeURIComponent(state.path)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: next, baseMtime: state.mtime }),
+  });
+  if (res.status === 409) { toast("文件已被外部修改，请刷新后重试"); closeHtmlEdit(); return; }
+  if (!res.ok) { toast("保存失败"); closeHtmlEdit(); return; }
+  const data = await res.json();
+  state.text = next;
+  state.mtime = data.mtime;
+  closeHtmlEdit();
+  await loadAnnotations();
+  toast("已写回源文件，批注重新锚定");
+});
 
 document.addEventListener("mousedown", (event) => {
   const menu = $("sel-menu");

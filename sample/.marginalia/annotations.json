@@ -352,12 +352,16 @@
         "region": null,
         "image": null,
         "created": "2026-09-04T05:10:22.350Z",
-        "status": "active",
-        "weight": 1,
+        "status": "deprecated",
+        "weight": 0,
         "history": [
           {
             "event": "created",
             "at": "2026-09-04T05:10:22.350Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-04T08:51:45.526Z"
           }
         ],
         "supersedes": [],
@@ -365,6 +369,202 @@
         "offsets": {
           "start": 675,
           "end": 680
+        }
+      },
+      {
+        "id": "A-0002",
+        "kind": "highlight",
+        "round": 5,
+        "quote": "阅读摘录：门店数字化的三个误区\n示例网页 · 虚构内容 · 用于演示 CoEditor 对 HTML 的荧光标记与批注\n\n误区一：把数字化等同于上系统。工具落了地，流程没变化，数据只是搬了个地方存放。\n误区二：把口径混着用。含外卖与不含外卖的利润率放在一起比较，结论就会失真。\n误区三：把试点结论直接外推。试点门店是挑出来的，外推前必须回答选择性偏差。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记与批注会锚定到原句，成为给 Agent 的约束。",
+        "prefix": "\n",
+        "suffix": "\n\n",
+        "body": "",
+        "x": 1119.89,
+        "y": 43.17,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T08:50:38.034Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T08:50:38.034Z"
+          },
+          {
+            "event": "conflict_with_A-0003",
+            "at": "2026-09-04T08:50:45.222Z"
+          },
+          {
+            "event": "conflict_with_A-0004",
+            "at": "2026-09-04T08:50:48.043Z"
+          },
+          {
+            "event": "conflict_with_A-0005",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T08:51:11.206Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T08:51:14.949Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [
+          "A-0003",
+          "A-0004",
+          "A-0005"
+        ],
+        "offsets": {
+          "start": 16,
+          "end": 255
+        }
+      },
+      {
+        "id": "A-0003",
+        "kind": "highlight",
+        "round": 5,
+        "quote": "阅读摘录：门店数字化的三个误区\n示例网页 · 虚构内容 · 用于演示 CoEditor 对 HTML 的荧光标记与批注\n\n误区一：把数字化等同于上系统。工具落了地，流程没变化，数据只是搬了个地方存放。\n误区二：把口径混着用。含外卖与不含外卖的利润率放在一起比较，结论就会失真。\n误区三：把试点结论直接外推。试点门店是挑出来的，外推前必须回答选择性偏差。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记与批注会锚定到原句，成为给 Agent 的约束。",
+        "prefix": "\n",
+        "suffix": "\n\n",
+        "body": "",
+        "x": 850,
+        "y": 191.234375,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T08:50:45.182Z",
+        "status": "deprecated",
+        "weight": 0,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T08:50:45.182Z"
+          },
+          {
+            "event": "conflict_with_A-0002",
+            "at": "2026-09-04T08:50:45.222Z"
+          },
+          {
+            "event": "conflict_with_A-0004",
+            "at": "2026-09-04T08:50:48.043Z"
+          },
+          {
+            "event": "conflict_with_A-0005",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-04T08:51:43.979Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [
+          "A-0002",
+          "A-0004",
+          "A-0005"
+        ],
+        "offsets": {
+          "start": 16,
+          "end": 255
+        }
+      },
+      {
+        "id": "A-0004",
+        "kind": "highlight",
+        "round": 5,
+        "quote": "阅读摘录：门店数字化的三个误区\n示例网页 · 虚构内容 · 用于演示 CoEditor 对 HTML 的荧光标记与批注\n\n误区一：把数字化等同于上系统。工具落了地，流程没变化，数据只是搬了个地方存放。\n误区二：把口径混着用。含外卖与不含外卖的利润率放在一起比较，结论就会失真。\n误区三：把试点结论直接外推。试点门店是挑出来的，外推前必须回答选择性偏差。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记与批注会锚定到原句，成为给 Agent 的约束。",
+        "prefix": "\n",
+        "suffix": "\n\n",
+        "body": "",
+        "x": 850,
+        "y": 463,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T08:50:48.012Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T08:50:48.012Z"
+          },
+          {
+            "event": "conflict_with_A-0002",
+            "at": "2026-09-04T08:50:48.043Z"
+          },
+          {
+            "event": "conflict_with_A-0003",
+            "at": "2026-09-04T08:50:48.043Z"
+          },
+          {
+            "event": "conflict_with_A-0005",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T08:51:46.627Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [
+          "A-0002",
+          "A-0003",
+          "A-0005"
+        ],
+        "offsets": {
+          "start": 16,
+          "end": 255
+        }
+      },
+      {
+        "id": "A-0005",
+        "kind": "text",
+        "round": 5,
+        "quote": "阅读摘录：门店数字化的三个误区\n示例网页 · 虚构内容 · 用于演示 CoEditor 对 HTML 的荧光标记与批注\n\n误区一：把数字化等同于上系统。工具落了地，流程没变化，数据只是搬了个地方存放。\n误区二：把口径混着用。含外卖与不含外卖的利润率放在一起比较，结论就会失真。\n误区三：把试点结论直接外推。试点门店是挑出来的，外推前必须回答选择性偏差。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记与批注会锚定到原句，成为给 Agent 的约束。",
+        "prefix": "\n",
+        "suffix": "\n\n",
+        "body": "测试",
+        "x": 850,
+        "y": 577,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T08:50:53.611Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T08:50:53.611Z"
+          },
+          {
+            "event": "conflict_with_A-0002",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "conflict_with_A-0003",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "conflict_with_A-0004",
+            "at": "2026-09-04T08:50:53.649Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T08:51:22.444Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [
+          "A-0002",
+          "A-0003",
+          "A-0004"
+        ],
+        "offsets": {
+          "start": 16,
+          "end": 255
         }
       }
     ],
