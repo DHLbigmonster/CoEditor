@@ -176,6 +176,7 @@ function brief(item) {
     status: item.status,
     weight: item.weight,
     kind: item.kind || "text",
+    kindLabel: item.kind === "highlight" ? "保留" : item.kind === "strike" ? "删除线" : item.kind === "region" ? "区域" : null,
     region: item.region || null,
     image: item.image || null,
     quote: item.quote,
