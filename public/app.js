@@ -216,6 +216,62 @@ function findAnchor(id) {
   return annotationRoot().querySelector(`.anchor[data-ann="${id}"]`);
 }
 
+/* ---------------- 批注卡 ↔ 正文 悬停互链 ----------------
+   四种元素都带 id：抽屉条目 .d-item[data-id]、画布卡 .card[data-id]、
+   正文锚点 .anchor[data-ann]、区域框 .region[data-ann]。悬停任一侧点亮其余侧。
+   正文锚点每次渲染都重建（wrapRange），所以正文侧必须事件委托，逐元素绑定会漏。 */
+let peekActive = null;
+const PEEK_SEL = ".anchor[data-ann], .region[data-ann]";
+
+function peekNodes(id) {
+  const root = annotationRoot();
+  const inDoc = root ? root.querySelectorAll(`.anchor[data-ann="${id}"], .region[data-ann="${id}"]`) : [];
+  const cards = document.querySelectorAll(`.d-item[data-id="${id}"], .card[data-id="${id}"]`);
+  return [...inDoc, ...cards];
+}
+
+function clearPeek() {
+  if (!peekActive) return;
+  for (const node of peekNodes(peekActive)) node.classList.remove("coeditor-peek");
+  peekActive = null;
+}
+
+function applyPeek(id) {
+  if (!id || peekActive === id) return;
+  clearPeek();
+  peekActive = id;
+  for (const node of peekNodes(id)) node.classList.add("coeditor-peek");
+}
+
+// root 可以是 #doc（元素）或 iframe 的 contentDocument（文档）：__coeditorPeek 标记两者都吃
+function bindPeek(root) {
+  if (!root || root.__coeditorPeek) return;
+  root.__coeditorPeek = true;
+  root.addEventListener("mouseover", (event) => {
+    const el = event.target && event.target.closest ? event.target.closest(PEEK_SEL) : null;
+    if (el) applyPeek(el.dataset.ann);
+    else clearPeek();
+  });
+  root.addEventListener("mouseout", (event) => {
+    const next = event.relatedTarget;
+    const nextEl = next && next.closest ? next.closest(PEEK_SEL) : null;
+    if (nextEl) applyPeek(nextEl.dataset.ann);
+    else clearPeek();
+  });
+}
+
+function bindPeekDrawer() {
+  const body = $("drawer-body");
+  if (!body || body.__coeditorPeek) return;
+  body.__coeditorPeek = true;
+  body.addEventListener("mouseover", (event) => {
+    const item = event.target.closest(".d-item[data-id]");
+    if (item) applyPeek(item.dataset.id);
+    else clearPeek();
+  });
+  body.addEventListener("mouseleave", clearPeek);
+}
+
 function renderMarkdown(source) {
   const out = [];
   let list = null;
@@ -388,8 +444,8 @@ function cardElement(annotation) {
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
     <div class="c-actions">${actions}</div>`;
 
-  card.addEventListener("mouseenter", () => { state.hovered = annotation.id; drawLines(); });
-  card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); });
+  card.addEventListener("mouseenter", () => { state.hovered = annotation.id; drawLines(); applyPeek(annotation.id); });
+  card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); clearPeek(); });
 
   card.addEventListener("mousedown", (event) => {
     if (event.target.tagName === "BUTTON") return;
@@ -1595,6 +1651,7 @@ async function renderDocument() {
           frame.__coeditorObserver = observer;
         }
         bindHtmlSelection(frame);
+        bindPeek(frame.contentDocument); // iframe 文档每次导航都是新的，逐次绑定
         resolve();
       }, { once: true });
       frame.srcdoc = htmlCoedit.html;
@@ -1846,7 +1903,8 @@ function buildHtmlCoedit(source) {
     .anchor{background:rgba(239,107,78,.16);box-shadow:inset 0 -2px 0 rgba(239,107,78,.72);border-radius:2px;cursor:pointer}
     .anchor[data-kind="highlight"]{background:rgba(246,211,91,.44);box-shadow:none}
     .anchor[data-kind="strike"]{background:rgba(239,107,78,.08);box-shadow:none;text-decoration:line-through;text-decoration-color:rgba(220,83,64,.9);text-decoration-thickness:2px}
-    .anchor[data-status="deprecated"]{opacity:.45}`;
+    .anchor[data-status="deprecated"]{opacity:.45}
+    .anchor.coeditor-peek{outline:2px solid rgba(239,107,78,.6);outline-offset:1px;border-radius:3px}`;
   preview.head.appendChild(guard);
   return { html: `<!doctype html>${preview.documentElement.outerHTML}`, original, map };
 }
@@ -2748,6 +2806,8 @@ window.addEventListener("popstate", (event) => {
 
 loadTree().then(async () => {
   syncWorkspaceModeUi();
+  bindPeek($("doc")); // #doc 是稳定容器，委托一次即可覆盖后续所有重渲染
+  bindPeekDrawer();
   await loadCanvas();
   const wanted = new URLSearchParams(location.search).get("doc");
   const fallback = document.querySelector("#tree .file");

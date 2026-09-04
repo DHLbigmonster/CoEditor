@@ -36,6 +36,7 @@
 13. **源码定位读真实选区，别读 `.CodeMirror-selected`**：CodeMirror 5 的 `.CodeMirror-selected` 是**绝对定位的高亮矩形 div**（`textContent` 恒为空），不是包住文字的 span。要断言「源码选中了哪段」，必须读 `cm.getSelection()` 或 `window.getSelection().toString()`（v0.9.2 因此误判过一次失败）。
 14. **往 vault 写新文档一律 `wx` + 自动改名**（`/api/create-file` 重名 409；`/api/save-brief` 自动 `-2/-3`）：改写提案、润色提案、修改指令都是**人的资产**，任何新写入方都不得覆盖同名文件。
 15. **先改完数组再 `join`**：`askEditWithAnnotations` 里 `prompt = lines.join()` 之后改 `lines[0]` 不会反映进 prompt（字符串是一次性的）。v0.9.3 补时间戳时踩过。
+16. **联动/高亮类交互一律事件委托**：正文锚点由 `wrapRange` 每次渲染重建，逐元素绑定必然漏。委托挂在稳定容器上——`#doc` 挂一次即可，HTML iframe 的 `contentDocument` 每次导航都是新文档，要在 `load` 里重挂。**iframe 内的样式不吃主样式表**，锚点高亮样式必须写进 `buildHtmlCoedit` 注入的 guard CSS。
 
 ## 测试电池（发布门禁）
 
@@ -45,10 +46,10 @@
   --user-data-dir=/tmp/marginalia-cdp-profile --no-first-run --no-sandbox --disable-setuid-sandbox \
   --disable-dev-shm-usage --disable-gpu about:blank &
 
-node tools/run-battery.mjs   # 退出码 0 = 10/10 全绿可发布
+node tools/run-battery.mjs   # 退出码 0 = 11/11 全绿可发布
 ```
 
-- 自动清端口残留（残留实例的 root 不符即失败——EADDRINUSE 会让 spawn 静默死、API 打到别人头上）→ 备隔离 vault（副本的副本，**绝不写用户 sample**）→ 隔离端口 4401 → 顺序跑 10 套真实 CDP 鼠标 E2E → ✅/❌ 汇总。
+- 自动清端口残留（残留实例的 root 不符即失败——EADDRINUSE 会让 spawn 静默死、API 打到别人头上）→ 备隔离 vault（副本的副本，**绝不写用户 sample**）→ 隔离端口 4401 → 顺序跑 11 套真实 CDP 鼠标 E2E → ✅/❌ 汇总。
 - 单套件可独立跑：`COEDITOR_E2E_BASE=http://127.0.0.1:4401 COEDITOR_E2E_COPY=<vault副本> node tools/eval-xxx.mjs`
 - **E2E 幂等两坑**：同一 vault 重复运行落点要随机偏移（旧元素拦截点击）；连续放置元素间距 > 元素尺寸。
 - **CDP 调试**：`Runtime.evaluate` 取值路径是 `ev.result.value`；`exceptionDetails` 在响应顶层；iframe 内 DOM 对父文档 querySelectorAll 不可见，必须 `frame.contentDocument`。
@@ -66,8 +67,7 @@ node tools/run-battery.mjs   # 退出码 0 = 10/10 全绿可发布
 ## 下一步候选（按价值排序）
 
 1. 真实使用反馈驱动的迭代（最高优先——产品已可用，让使用说话）
-2. 批注卡在阅读模式与正文联动的增强（悬停高亮互链）
-3. 多 vault 最近打开记录
+2. 多 vault 最近打开记录
 4. 修改指令落盘后，让 Agent 回写「处理结果」并由 CoEditor 读取（目前 Agent 改完仍靠人去点「已处理」或调 MCP）
 
 ## 协作纪律（血泪教训浓缩）
