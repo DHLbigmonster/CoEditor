@@ -16,7 +16,7 @@ function setVault(next) {
 }
 
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
-const BINARY_EXT = new Set([".pdf"]);
+const BINARY_EXT = new Set([".pdf", ".docx", ".pptx"]);
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"]);
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -159,7 +159,8 @@ async function listTree(dir = ROOT, base = ROOT) {
     } else if (TEXT_EXT.has(extension)) {
       out.push({ name: entry.name, path: rel, type: "file", kind: "text" });
     } else if (BINARY_EXT.has(extension)) {
-      out.push({ name: entry.name, path: rel, type: "file", kind: "pdf" });
+      const kind = extension === ".pdf" ? "pdf" : extension === ".docx" ? "docx" : "pptx";
+      out.push({ name: entry.name, path: rel, type: "file", kind });
     } else if (IMAGE_EXT.has(extension)) {
       out.push({ name: entry.name, path: rel, type: "file", kind: "image" });
     }
@@ -191,7 +192,8 @@ const server = http.createServer(async (req, res) => {
       const info = await stat(target);
       const extension = extname(target).toLowerCase();
       if (BINARY_EXT.has(extension) || IMAGE_EXT.has(extension)) {
-        return send(200, JSON.stringify({ path: url.searchParams.get("p"), binary: true, kind: BINARY_EXT.has(extension) ? "pdf" : "image", mtime: info.mtimeMs }));
+        const kind = extension === ".pdf" ? "pdf" : extension === ".docx" ? "docx" : extension === ".pptx" ? "pptx" : "image";
+        return send(200, JSON.stringify({ path: url.searchParams.get("p"), binary: true, kind, mtime: info.mtimeMs }));
       }
       const text = await readFile(target, "utf8");
       return send(200, JSON.stringify({ path: url.searchParams.get("p"), text, mtime: info.mtimeMs }));

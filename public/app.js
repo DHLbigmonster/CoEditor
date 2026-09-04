@@ -14,7 +14,19 @@ function ownsCanvas(item) {
 }
 
 /* ---------------- 坐标 ---------------- */
+/* 画布边界：视野 clamp 到「内容 bbox ± slack」，不需要滑到很远的地方 */
+function clampView() {
+  const page = $("page");
+  const contentW = (page.offsetWidth + CARD_W + 160) || PAGE_W + CARD_W;
+  const contentH = (page.offsetHeight + 160) || 900;
+  const rect = $("viewport").getBoundingClientRect();
+  const slack = 600; // 内容外允许漫游的余量
+  view.panX = Math.min(slack, Math.max(rect.width - contentW * view.zoom - slack, view.panX));
+  view.panY = Math.min(slack, Math.max(rect.height - contentH * view.zoom - slack, view.panY));
+}
+
 function applyTransform() {
+  clampView();
   $("world").style.transform = `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`;
   $("zoom").textContent = `${Math.round(view.zoom * 100)}%`;
   const step = 26 * view.zoom;
@@ -1266,6 +1278,8 @@ async function patch(id, payload) {
 
 function kindOf(path) {
   if (/\.pdf$/i.test(path)) return "pdf";
+  if (/\.docx$/i.test(path)) return "docx";
+  if (/\.pptx$/i.test(path)) return "pptx";
   if (/\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path)) return "image";
   return "text";
 }
@@ -1281,18 +1295,48 @@ async function waitForPdfRenderer(timeout = 6000) {
 async function renderDocument() {
   if (editSession) return; // 编辑态不重渲染，外部修改由保存时 409 提示
   const host = $("doc");
+  host.classList.remove("docx-view");
   if (state.mode === "pdf") {
     if (!(await waitForPdfRenderer())) {
       host.innerHTML = '<p style="color:#c99537">PDF 渲染器未能加载（离线？）。可用系统预览打开。</p>';
       return;
     }
     try {
-      const result = await window.renderPdfToContainer(host, `/api/raw?p=${encodeURIComponent(state.path)}`);
+      // PDF 宽度自适应纸张（消除横向溢出），支持 1/2/3 列阅读布局
+      const cols = state.pdfCols || 1;
+      const result = await window.renderPdfToContainer(host, `/api/raw?p=${encodeURIComponent(state.path)}`, { cols });
       state.text = result.text;
-      $("docpath").textContent = `${state.path} · ${result.pages} 页`;
+      $("docpath").textContent = `${state.path} · ${result.pages} 页 · ${cols} 列`;
+      $("bar-pdf-cols").hidden = false;
+      document.querySelectorAll("#bar-pdf-cols button").forEach((b) => b.classList.toggle("active", Number(b.dataset.cols) === cols));
     } catch (err) {
+      $("bar-pdf-cols").hidden = true;
       host.innerHTML = `<p style="color:#e0604f">PDF 渲染失败：${String(err && err.message || err)}</p>`;
     }
+    return;
+  }
+  $("bar-pdf-cols").hidden = true;
+  if (state.mode === "docx") {
+    // Word 文档：mammoth 转 HTML 渲染（样式贴近 Word 语义结构），文本可选中批注
+    host.innerHTML = '<p style="color:var(--ink-faint)">正在解析 Word 文档…</p>';
+    try {
+      const buf = await (await fetch(`/api/raw?p=${encodeURIComponent(state.path)}`)).arrayBuffer();
+      const result = await window.mammoth.convertToHtml({ arrayBuffer: buf });
+      host.innerHTML = result.value || "<p>（空文档）</p>";
+      host.classList.add("docx-view");
+      state.text = host.innerText;
+    } catch (err) {
+      host.innerHTML = `<p style="color:#e0604f">Word 解析失败：${String(err && err.message || err)}</p>`;
+    }
+    return;
+  }
+  if (state.mode === "pptx") {
+    host.innerHTML = `
+      <div style="padding:60px 40px;text-align:center">
+        <p style="font-size:15px;margin-bottom:10px">PPT 预览暂不支持</p>
+        <p style="font-size:12.5px;color:var(--ink-faint);line-height:1.9">pptx 渲染需要引入重量级依赖（违背零依赖原则）。<br/>当前可直接用「打开批注」为 PPT 截图/导出图做区域批注，批注同样进入约束体系。</p>
+      </div>`;
+    state.text = "";
     return;
   }
   if (state.mode === "image") {
@@ -1580,6 +1624,14 @@ function exitEditMode() {
   if (bar) bar.remove();
   loadAnnotations(); // 重渲染 + 重锚定
 }
+
+/* PDF 列布局切换（1/2/3 列，像正常阅读 PDF 一样展开） */
+$("bar-pdf-cols").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-cols]");
+  if (!button || !state.path || state.mode !== "pdf") return;
+  state.pdfCols = Number(button.dataset.cols);
+  await loadAnnotations(); // 重渲染 + 批注重锚定（文本层重建）
+});
 
 /* ---------------- 画布交互 ---------------- */
 $("viewport").addEventListener("mousedown", (event) => {

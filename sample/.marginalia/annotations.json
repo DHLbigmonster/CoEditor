@@ -337,6 +337,36 @@
           "h": 0.09
         }
       }
+    ],
+    "读书笔记-示例网页.html": [
+      {
+        "id": "A-0001",
+        "kind": "highlight",
+        "round": 1,
+        "quote": "选择性偏差",
+        "prefix": "，结论就会失真。\n误区三：把试点结论直接外推。试点门店是挑出来的，外推前必须回答",
+        "suffix": "。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记",
+        "body": "",
+        "x": 850,
+        "y": 349.0000406901042,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T05:10:22.350Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T05:10:22.350Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": {
+          "start": 675,
+          "end": 680
+        }
+      }
     ]
   },
   "arrows": [

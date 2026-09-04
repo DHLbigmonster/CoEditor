@@ -313,6 +313,18 @@ body.lines-quiet #lines path.lit { opacity: .9 !important; }
 #doc .pdf-text { position: absolute; inset: 0; }
 #doc .pdf-text span { color: transparent; font-family: Helvetica, Arial, sans-serif; }
 body.paper-dark #doc .pdf-page { background: #fff; }
+/* 多列阅读布局（1/2/3 列，像正常阅读 PDF 一样展开） */
+#doc.pdf-multi { display: flex; flex-wrap: wrap; gap: 16px; align-content: flex-start; }
+#doc.pdf-multi .pdf-page { margin: 0; }
+
+/* ---------- PDF 列布局切换按钮组 ---------- */
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: rgba(236, 231, 221, .06); border-radius: 9px; }
+.seg button {
+  border: none; background: transparent; color: var(--ink-faint);
+  font-size: 11.5px; padding: 4px 8px; border-radius: 7px; cursor: pointer;
+}
+.seg button.active { background: rgba(236, 231, 221, .12); color: var(--ink); }
+.seg[hidden] { display: none; }
 
 .image-stage { position: relative; display: inline-block; line-height: 0; }
 #image-node { display: block; max-width: 100%; border-radius: 6px; cursor: crosshair; }
@@ -688,3 +700,10 @@ body.paper-dark .note.board { background: linear-gradient(180deg, #2c2822, #241f
   .bar-tools .chip { padding: 5px 7px; font-size: 11px; }
   .zoom { display: none; }
 }
+
+/* ---------- Word 文档渲染（mammoth HTML） ---------- */
+#doc.docx-view { cursor: text; }
+#doc.docx-view table { border-collapse: collapse; margin: 18px 0; width: 100%; font-size: 14px; }
+#doc.docx-view table td, #doc.docx-view table th { border: 1px solid rgba(38, 35, 30, .18); padding: 8px 10px; text-align: left; }
+#doc.docx-view img { max-width: 100%; }
+#doc.docx-view a { color: #b0542f; }

@@ -39,6 +39,12 @@
       <button id="btn-drawer" class="chip">批注历史</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
+      <span id="bar-pdf-cols" class="seg" hidden title="PDF 页面布局：单列 / 双列 / 三列">
+        <button data-cols="1" class="active">▦1</button>
+        <button data-cols="2">▦2</button>
+        <button data-cols="3">▦3</button>
+      </span>
+      <span class="divider"></span>
       <button id="btn-out" class="icon" title="缩小">−</button>
       <span id="zoom" class="zoom">100%</span>
       <button id="btn-in" class="icon" title="放大">＋</button>
@@ -146,6 +152,7 @@ window.addEventListener("unhandledrejection", (e) => {
   if (t) { t.textContent = "Promise拒绝: " + String(e.reason && e.reason.message || e.reason); t.className = "show err"; }
 });
 </script>
+<script src="/vendor/mammoth/mammoth.browser.min.js"></script>
 <script type="module" src="/pdf-layer.mjs"></script>
 <script src="/app.js"></script>
 </body>
