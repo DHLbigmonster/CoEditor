@@ -4,6 +4,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
 
 // 渲染 PDF 为「连续长纸：页面 canvas + 自建文本层 span」，文本层供批注锚定使用。
 // 宽度自适应容器（消除横向溢出），cols 支持 1/2/3 列阅读布局。
+// v0.7.5：画布按需绘制（IntersectionObserver）——文本层与结构即时建立（锚定/检索/批注不受影响），
+// 昂贵的 page.render 只画视口附近（±900px）的页面；长文档不再全量渲染卡顿。
+
 window.renderPdfToContainer = async function renderPdfToContainer(container, url, { cols = 1, maxScale = 1.4 } = {}) {
   container.innerHTML = "";
   const pdf = await pdfjsLib.getDocument({ url }).promise;
@@ -19,6 +22,23 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
   const scale = Math.min(maxScale, pageW / base.width);
   container.classList.toggle("pdf-multi", cols > 1);
 
+  const outputScale = Math.max(1, window.devicePixelRatio || 1);
+  const paintQueue = [];
+  let paintChain = Promise.resolve();
+
+  const paint = (item) => {
+    paintChain = paintChain
+      .then(async () => {
+        if (item.canvas.dataset.painted || !item.canvas.isConnected) return;
+        item.canvas.dataset.painted = "1";
+        const context = item.canvas.getContext("2d");
+        const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
+        await item.page.render({ canvasContext: context, viewport: item.viewport, transform }).promise;
+      })
+      .catch(() => {}); // 单页绘制失败不阻塞队列
+    return paintChain;
+  };
+
   let text = "";
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
@@ -30,9 +50,8 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
     wrapper.style.height = `${viewport.height}px`;
     wrapper.style.marginBottom = `${gap}px`;
 
+    // HiDPI：CSS 尺寸维持阅读布局，像素缓冲按设备倍率
     const canvas = document.createElement("canvas");
-    // PDF.js 官方 HiDPI 模式：CSS 尺寸维持阅读布局，像素缓冲按设备倍率渲染。
-    const outputScale = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = Math.floor(viewport.width * outputScale);
     canvas.height = Math.floor(viewport.height * outputScale);
     canvas.style.width = `${viewport.width}px`;
@@ -52,10 +71,7 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
 
     container.appendChild(wrapper);
 
-    const context = canvas.getContext("2d");
-    const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
-    await page.render({ canvasContext: context, viewport, transform }).promise;
-
+    // 文本层即时建立（批注锚定、全文提取、检索都依赖它）
     const content = await page.getTextContent();
     for (const item of content.items) {
       if (!item.str) continue;
@@ -74,7 +90,35 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
       text += item.str;
       if (item.hasEOL) text += "\n";
     }
+
+    // 首屏两页立即绘制，其余进入按需队列
+    if (pageNumber <= 2) {
+      paint({ page, canvas, viewport });
+    } else {
+      paintQueue.push({ page, canvas, viewport, wrapper });
+    }
   }
+
+  // 按需绘制：页面滚进视口 ±900px 才真正 render（两种模式都生效——IO 对 transform 位移同样响应）
+  if (paintQueue.length) {
+    const scrollRoot = container.closest("#viewport") || null;
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const item = paintQueue.find((p) => p.wrapper === entry.target);
+          if (!item) continue;
+          paint(item);
+          paintQueue.splice(paintQueue.indexOf(item), 1);
+          io.unobserve(entry.target);
+        }
+      }, { root: scrollRoot, rootMargin: "900px 0px" });
+      paintQueue.forEach((p) => io.observe(p.wrapper));
+    } else {
+      paintQueue.forEach((p) => paint(p)); // 兜底：无 IO 就全画
+    }
+  }
+
   return { text, pages: pdf.numPages, scale, cols };
 };
 
