@@ -1968,7 +1968,7 @@ async function saveEdit() {
     body: JSON.stringify({ text: editSession.cm.getValue(), baseMtime: editSession.baseMtime }),
   });
   if (res.status === 409) {
-    toast("文件已被外部修改，请先「完成」退出后重新进入编辑");
+    toast("文件已被外部修改，请「返回阅读」后重新进入编辑");
     const fresh = await (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json();
     editSession.baseMtime = fresh.mtime;
     return;
@@ -2342,6 +2342,7 @@ $("fs-open").addEventListener("click", async () => {
 /* 防误判：先验服务端当前 vault。目录被其他标签页/CLI 切走时，同相对路径会读到别的文件，
    mtime 必然变化 —— 不验 vault 就会虚推进批次（真实事故：2 秒内连推 7 轮）。 */
 async function resetDocView() {
+  if (editSession) leaveEditUi(); // 目录切换守卫：不能留一个指向旧文件的悬空编辑会话
   state.path = null;
   state.annotations = [];
   $("empty").style.display = "";
