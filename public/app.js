@@ -813,18 +813,37 @@ async function askEditWithAnnotations() {
     ] : []),
   ];
   const total = active.length + canvasArrows.length;
+  // 先补时间戳再 join：prompt 是一次性字符串，事后改 lines[0] 不会反映进去
+  const stamp = new Date().toLocaleString("zh-CN", { hour12: false });
+  lines[0] = `[@CoEditor] 按标注修改 ${state.path} · 生成于 ${stamp}`;
   const prompt = lines.join("\n");
+  // 落盘名沿用 vault 既有命名习惯（研究设计笔记-改写提案.md）：<文档名>-修改指令.md
+  const briefName = `${(state.path || "未命名").replace(/\.[^./]+$/, "")}-修改指令.md`;
   $("drawer-body").innerHTML = `
     <div class="d-item">
       <div class="d-item-head"><span class="c-id">修改指令已组装</span></div>
-      <div class="d-item-body">${total} 条约束（批注 ${active.length} · 箭头 ${canvasArrows.length}）${screenshotRel ? " · 标注图已导出" : ""}。复制后发给任何 Agent 即可执行。</div>
+      <div class="d-item-body">${total} 条约束（批注 ${active.length} · 箭头 ${canvasArrows.length}）${screenshotRel ? " · 标注图已导出" : ""}。复制给 Agent，或存成 .md 放进目录——Agent 有目录读权限时自己读文件更省事。</div>
     </div>
     <textarea id="export-prompt" class="d-export">${escapeHtml(prompt)}</textarea>
-    <button id="export-copy" class="chip">复制修改指令</button>`;
+    <div class="d-export-actions">
+      <button id="export-copy" class="chip">复制修改指令</button>
+      <button id="export-save-md" class="chip">存为 .md 放进目录</button>
+    </div>`;
   $("drawer").hidden = false;
   $("export-copy").addEventListener("click", async () => {
     await navigator.clipboard.writeText(prompt);
     toast("修改指令已复制，粘贴给 Agent 即可");
+  });
+  $("export-save-md").addEventListener("click", async () => {
+    const res = await fetch("/api/save-brief", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: briefName, text: prompt }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return toast(data.error === "empty" ? "没有可保存的指令" : "保存失败，请重试");
+    toast(`已存为 ${data.rel}`);
+    await loadTree();
   });
 }
 

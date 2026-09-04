@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- 备选方案 C「边际批注」：页边渐变批注条 + 高亮行，呼应 marginalia -->
+  <defs>
+    <linearGradient id="ce-c" x1="60" y1="48" x2="140" y2="148" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB43A"/>
+      <stop offset="0.55" stop-color="#FF8A3D"/>
+      <stop offset="1" stop-color="#FF6B4A"/>
+    </linearGradient>
+  </defs>
+  <rect x="44" y="24" width="112" height="152" rx="16" fill="#FFFFFF" stroke="#EFE4D6" stroke-width="3"/>
+  <rect x="60" y="48" width="10" height="104" rx="5" fill="url(#ce-c)"/>
+  <rect x="86" y="50" width="52" height="10" rx="5" fill="#E3D5C3"/>
+  <rect x="86" y="72" width="64" height="10" rx="5" fill="#D8C7B2"/>
+  <rect x="86" y="94" width="44" height="10" rx="5" fill="url(#ce-c)"/>
+  <rect x="86" y="116" width="58" height="10" rx="5" fill="#D8C7B2"/>
+  <rect x="86" y="138" width="36" height="10" rx="5" fill="#D8C7B2"/>
+</svg>

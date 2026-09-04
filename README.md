@@ -1,4 +1,8 @@
-# CoEditor · v0.9.2
+# CoEditor · v0.9.3
+
+<p align="center">
+  <img src="docs/logo/logo.svg" width="132" alt="CoEditor" />
+</p>
 
 CoEditor 是一层覆盖在本地文件夹上的网页阅读、编辑与批注界面。它把人的反馈保存成可追溯、可交给 Agent 的结构化约束，同时尽量保持普通文档工具的直觉：先阅读，需要时编辑，图片工作才进入画布。
 
@@ -18,6 +22,7 @@ CoEditor 是一层覆盖在本地文件夹上的网页阅读、编辑与批注�
 - 图片与 PDF 可框选区域写批注；图片可导出烧录了区域框与编号的标注图，再交给 Agent 改图。
 - 画布保留必要的三类动作：选择/平移、手绘箭头、贴图，以及 PDF 区域框选。便签与白板已从界面移除。
 - 通过 URL、HTTP、CLI 或 MCP 让 Agent 读取当前约束。图片新版本可作为图卡放回画布，不覆盖原图。
+- 「把修改指令交给 Agent」（••• 菜单）：把当前批注与画布箭头汇总成一份可执行的修改指令，复制粘贴、或**存成 `.md` 放进当前目录**（`<文档名>-修改指令.md`）让有目录读权限的 Agent 自己读。同名自动加 `-2/-3`，绝不覆盖已有文件。
 
 ## 安装与启动
 
@@ -127,6 +132,15 @@ node tools/run-battery.mjs
 ```
 
 测试会复制 `sample` 到临时目录并启动隔离端口，不写仓库演示数据或用户文件。v0.9.0 的 8 套发布门禁覆盖：Markdown/PDF/DOCX/HTML 选区、保留无重影、编辑、PDF 区域、长 PDF 懒绘制、HTML 直改、vault 切换守卫、文件树折叠、批注编辑/删除、图片区域防重复、图卡独立拖动和工具条定位。
+
+## 品牌资产
+
+设计文件在 `docs/logo/`，暖橙渐变（`#FFB43A → #FF8A3D → #FF6B4A`）+ 暖墨（`#2A211A`）：
+
+- `logo.svg` 主标（方案 B「画布选区」）；`logo-white.svg` 深底用；`logo-a.svg` / `logo-c.svg` 为备选留档，随时可换
+- `icon-light.svg`（浅底）/ `icon-orange.svg`（橙底 App Icon）
+- PNG：`logo-512/128/32/16.png`、`icon-512/180/32.png`
+- 网页 favicon 由 `public/favicon.svg`（PNG 兜底 `favicon.png`）提供
 
 ## 暂不做
 

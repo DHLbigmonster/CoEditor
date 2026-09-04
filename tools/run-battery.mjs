@@ -74,6 +74,7 @@ const suites = [
   ["vault 切换守卫：不虚推进批次", "eval-vault-guard.mjs", [["guardWorked\": true", 1]]],
   ["v0.9：树折叠 / 批注编辑删除 / 图片区域防重复", "eval-v09.mjs", [["treeCollapsed\": true", 1], ["visibleNoPattern\": true", 1], ["displayNoMatchesApi\": true", 1], ["editOpened\": true", 1], ["editPersisted\": true", 1], ["deletePersisted\": true", 1], ["oneRegionCreated\": true", 1], ["oneRegionBox\": true", 1], ["oneRegionLine\": true", 1], ["canvasDeleteWorked\": true", 1]]],
   ["v0.9.2：新建文档 / 成品定位源码 / MCP resolve 闭环 / 顶栏减负", "eval-v092.mjs", [["apiCreated\": true", 1], ["dupBlocked\": true", 1], ["traversalSanitized\": true", 1], ["resolveMarked\": true", 1], ["constraintsDropped\": true", 1], ["editSplitShown\": true", 1], ["clickLocated\": true", 1], ["selectionLocated\": true", 1], ["uiCreated\": true", 1], ["uiEditOpened\": true", 1], ["topbarLean\": true", 1]]],
+  ["v0.9.3：修改指令落盘为 .md（同名自动 -2，绝不覆盖）", "eval-brief.mjs", [["annCreated\": true", 1], ["panelShown\": true", 1], ["treeHasBrief\": true", 1], ["brief1Exists\": true", 1], ["brief1HasAnnotationNo\": true", 1], ["brief1HasQuote\": true", 1], ["brief1HasTargetFile\": true", 1], ["brief2Exists\": true", 1], ["brief1WrittenFirst\": true", 1], ["briefHasStamp\": true", 1]]],
 ];
 
 const results = [];

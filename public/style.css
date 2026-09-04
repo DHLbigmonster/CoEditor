@@ -367,6 +367,8 @@ body.paper-dark #doc .pdf-page { background: #fff; }
   padding: 12px; font: 12px/1.6 "SF Mono", Menlo, monospace; resize: vertical;
 }
 .d-export:focus { outline: none; box-shadow: 0 0 0 2px rgba(222, 97, 79, .3); }
+.d-export-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.d-export-actions .chip { cursor: pointer; }
 
 /* ---------- 约束清单抽屉 ---------- */
 #drawer {

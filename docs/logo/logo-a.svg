@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- 备选方案 A「批注气泡」：文档页 + 讨论气泡 + 上升小气泡 -->
+  <defs>
+    <linearGradient id="ce-a" x1="82" y1="100" x2="178" y2="186" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB43A"/>
+      <stop offset="0.55" stop-color="#FF8A3D"/>
+      <stop offset="1" stop-color="#FF6B4A"/>
+    </linearGradient>
+  </defs>
+  <rect x="34" y="26" width="106" height="140" rx="18" fill="#2A211A"/>
+  <rect x="54" y="52" width="66" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.92"/>
+  <rect x="54" y="76" width="48" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.5"/>
+  <rect x="54" y="100" width="56" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.5"/>
+  <path d="M100 100 H160 Q178 100 178 118 V146 Q178 164 160 164 H126 L104 186 V164 H100 Q82 164 82 146 V118 Q82 100 100 100 Z" fill="url(#ce-a)" stroke="#FFFFFF" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="116" cy="132" r="7" fill="#FFFFFF"/>
+  <circle cx="138" cy="132" r="7" fill="#FFFFFF" fill-opacity="0.75"/>
+  <circle cx="160" cy="132" r="7" fill="#FFFFFF" fill-opacity="0.55"/>
+  <circle cx="182" cy="84" r="6" fill="#FF9A4D" fill-opacity="0.5"/>
+  <circle cx="168" cy="64" r="4" fill="#FFB43A" fill-opacity="0.4"/>
+</svg>

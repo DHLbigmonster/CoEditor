@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- CoEditor App Icon · 浅底（奶油底 + 彩色标） -->
+  <defs>
+    <linearGradient id="ce-g" x1="24" y1="24" x2="176" y2="176" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB43A"/>
+      <stop offset="0.55" stop-color="#FF8A3D"/>
+      <stop offset="1" stop-color="#FF6B4A"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="188" height="188" rx="44" fill="#FFF3E4" stroke="#F0E2D2" stroke-width="2"/>
+  <path d="M24 60 V44 Q24 24 44 24 H60" stroke="url(#ce-g)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M140 24 H156 Q176 24 176 44 V60" stroke="url(#ce-g)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M176 140 V156 Q176 176 156 176 H140" stroke="url(#ce-g)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M60 176 H44 Q24 176 24 156 V140" stroke="url(#ce-g)" stroke-width="13" stroke-linecap="round"/>
+  <path d="M130.6 74.3 A40 40 0 1 0 130.6 125.7" stroke="#2A211A" stroke-width="27" stroke-linecap="round"/>
+</svg>

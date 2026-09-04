@@ -301,6 +301,42 @@ const server = http.createServer(async (req, res) => {
       return send(200, JSON.stringify({ ok: true, rel }));
     }
 
+    /* ---------- 「交给 Agent」把修改指令落成 vault 里的 .md ----------
+       同名自动加 -2/-3 后缀；即使并发也用 wx 保证绝不覆盖已有文件（改写提案/润色提案是人的资产）。 */
+    if (url.pathname === "/api/save-brief" && req.method === "POST") {
+      const body = await new Promise((ok) => {
+        let raw = "";
+        req.on("data", (chunk) => (raw += chunk));
+        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
+      });
+      const text = String(body.text || "");
+      if (!text.trim()) return send(400, JSON.stringify({ error: "empty" }));
+      const clean = String(body.name || "")
+        .trim()
+        .split(/[\\/]/)
+        .filter((seg) => seg && seg !== "." && seg !== "..")
+        .map((seg) => seg.replace(/[^\w.\-一-鿿]/g, "_"))
+        .join("/");
+      if (!clean) return send(400, JSON.stringify({ error: "invalid name" }));
+      const base = clean.replace(/\.(md|markdown)$/i, "");
+      const dir = safeResolve(`${base}.md`);
+      if (!dir) return send(400, JSON.stringify({ error: "invalid path" }));
+      await mkdir(dirname(dir), { recursive: true });
+      for (let n = 1; n <= 200; n += 1) {
+        const rel = `${base}${n === 1 ? "" : `-${n}`}.md`;
+        const target = safeResolve(rel);
+        if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
+        try {
+          await writeFile(target, text, { flag: "wx" }); // 已存在则抛 EEXIST，换下一个序号
+          return send(200, JSON.stringify({ ok: true, rel }));
+        } catch (err) {
+          if (err && err.code === "EEXIST") continue;
+          throw err;
+        }
+      }
+      return send(409, JSON.stringify({ error: "too many versions" }));
+    }
+
     /* ---------- 批次：一次「保存本批次」或一次外部修改 = 推进一轮 ---------- */
     if (url.pathname.startsWith("/api/rounds")) {
       const body = await new Promise((ok) => {

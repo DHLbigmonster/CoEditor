@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <!-- CoEditor logo · 纯白版，用于深色背景 -->
+  <path d="M24 60 V44 Q24 24 44 24 H60" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round"/>
+  <path d="M140 24 H156 Q176 24 176 44 V60" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round"/>
+  <path d="M176 140 V156 Q176 176 156 176 H140" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round"/>
+  <path d="M60 176 H44 Q24 176 24 156 V140" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round"/>
+  <path d="M130.6 74.3 A40 40 0 1 0 130.6 125.7" stroke="#FFFFFF" stroke-width="27" stroke-linecap="round"/>
+</svg>
