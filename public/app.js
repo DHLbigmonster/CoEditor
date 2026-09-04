@@ -608,7 +608,7 @@ async function askEditWithAnnotations() {
     "生效批注：",
     ...active.map((item) => {
       const where = item.region
-        ? `区域 x=${item.region.x.toFixed(2)} y=${item.region.y.toFixed(2)} w=${item.region.w.toFixed(2)} h=${item.region.h.toFixed(2)}`
+        ? `${item.region.page ? `第 ${item.region.page} 页 ` : ""}区域 x=${item.region.x.toFixed(2)} y=${item.region.y.toFixed(2)} w=${item.region.w.toFixed(2)} h=${item.region.h.toFixed(2)}${item.image ? ` · 图 ${item.image}` : ""}`
         : `「${(item.quote || "").slice(0, 60)}」`;
       const conflict = (item.conflicts_with || []).length ? ` ⚠与${item.conflicts_with.join("/")}冲突` : "";
       return `- [${item.id}] w=${Number(item.weight ?? 1).toFixed(2)} ${where} → ${item.body}${conflict}`;
