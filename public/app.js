@@ -1802,12 +1802,10 @@ $("workspace-modes").addEventListener("click", (event) => {
 function enterEditMode() {
   if (editSession) return;
   const doc = $("doc");
-  const textarea = document.createElement("textarea");
-  textarea.id = "md-editor";
-  textarea.value = state.text;
-  textarea.spellcheck = false;
+  const holder = document.createElement("div");
+  holder.id = "md-editor";
   doc.innerHTML = "";
-  doc.appendChild(textarea);
+  doc.appendChild(holder);
   document.body.classList.add("editing-doc");
   hideSelMenu();
   const bar = document.createElement("div");
@@ -1817,14 +1815,22 @@ function enterEditMode() {
     <button id="edit-save" class="primary">保存 ⌘S</button>
     <button id="edit-cancel" class="ghost">返回阅读</button>`;
   $("page").prepend(bar);
-  editSession = { textarea, baseMtime: state.mtime };
-  textarea.addEventListener("keydown", (event) => {
-    event.stopPropagation(); // 不触发画布快捷键
-    if ((event.metaKey || event.ctrlKey) && event.key === "s") { event.preventDefault(); saveEdit(); }
-  });
   $("edit-save").addEventListener("click", saveEdit);
   $("edit-cancel").addEventListener("click", () => setWorkspaceMode("read"));
-  textarea.focus();
+  const cm = CodeMirror(holder, {
+    value: state.text,
+    mode: /\.(html?|json)$/i.test(state.path || "") ? (/\.html?$/i.test(state.path || "") ? "htmlmixed" : { name: "javascript", json: true }) : "markdown",
+    lineNumbers: true,
+    lineWrapping: true,
+    styleActiveLine: true,
+    viewportMargin: 10,
+    extraKeys: { "Cmd-S": saveEdit, "Ctrl-S": saveEdit },
+  });
+  cm.focus();
+  // 容器刚重建时布局未稳定，CM 需要手动 refresh 才会绘制内容
+  cm.refresh();
+  setTimeout(() => cm.refresh(), 80);
+  editSession = { cm, baseMtime: state.mtime };
 }
 
 async function saveEdit() {
@@ -1832,7 +1838,7 @@ async function saveEdit() {
   const res = await fetch(`/api/write?p=${encodeURIComponent(state.path)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: editSession.textarea.value, baseMtime: editSession.baseMtime }),
+    body: JSON.stringify({ text: editSession.cm.getValue(), baseMtime: editSession.baseMtime }),
   });
   if (res.status === 409) {
     toast("文件已被外部修改，请先「完成」退出后重新进入编辑");
@@ -1843,7 +1849,7 @@ async function saveEdit() {
   if (!res.ok) { toast("保存失败： " + (await res.json().catch(() => ({}))).error); return; }
   const data = await res.json();
   state.mtime = data.mtime;
-  state.text = editSession.textarea.value; // 同步内存文本，loadAnnotations 重渲染才用新内容
+  state.text = editSession.cm.getValue(); // 同步内存文本，loadAnnotations 重渲染才用新内容
   toast("已保存，批注正在重新锚定");
   leaveEditUi();
   state.workspaceMode = "read";

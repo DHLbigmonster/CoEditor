@@ -963,3 +963,24 @@ body[data-workspace-mode="edit"] #cards { display: none; }
 /* ================= v0.7.1 · 批注筛选三态（仅生效 / 本轮 / 全部） ================= */
 body.round-only .card[data-round-cur="0"] { opacity: .16; }
 body.round-only .card[data-round-cur="0"]:hover { opacity: .85; }
+
+/* ================= v0.7.2 · CodeMirror 源码编辑器 ================= */
+#md-editor { padding: 0 30px 70px; }
+#md-editor .CodeMirror {
+  height: calc(100vh - 224px); min-height: 480px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13.5px; line-height: 1.8;
+  background: #fffefb; color: #29251f;
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 6px 4px;
+}
+#md-editor .CodeMirror-gutters { background: #f6f3ec; border-right: 1px solid var(--line); }
+#md-editor .CodeMirror-activeline-background { background: rgba(238, 107, 80, .05); }
+#md-editor .CodeMirror-cursor { border-left: 2px solid #ee6b50; }
+#md-editor .CodeMirror-selected { background: rgba(238, 107, 80, .14) !important; }
+/* CM 行元素是 pre，屏蔽 #doc pre 的全局样式误伤 */
+#md-editor .CodeMirror pre.CodeMirror-line,
+#md-editor .CodeMirror pre {
+  background: transparent; margin: 0; padding: 0 4px;
+  border-radius: 0; overflow: visible; text-align: left;
+}
