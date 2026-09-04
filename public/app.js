@@ -6,7 +6,8 @@ const RAIL_X = PAGE_W + 90;
 
 const view = { panX: 60, panY: 40, zoom: 1 };
 const state = { path: null, text: "", mtime: 0, annotations: [], selected: null,
-  arrows: [], notes: [], images: [], drafts: [], canvasTool: "select", arrowColor: "red", canvasSelected: null };
+  arrows: [], notes: [], images: [], drafts: [], canvasTool: "select", arrowColor: "red", canvasSelected: null,
+  vaultRoot: "" };
 
 /* 画布元素按文档归属：无 doc 的旧元素视为全局，始终显示 */
 function ownsCanvas(item) {
@@ -1184,6 +1185,7 @@ window.addEventListener("keydown", (event) => {
   const target = event.target;
   const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
   if (typing || event.metaKey || event.ctrlKey) return;
+  if (event.key === "Escape" && !$("fs-modal").hidden) { $("fs-modal").hidden = true; return; } // 文件夹选择器优先响应 Esc
   if (event.key === "v" || event.key === "V") setTool("select");
   if (event.key === "a" || event.key === "A") setTool("arrow");
   if (event.key === "n" || event.key === "N") setTool("note");
@@ -1428,6 +1430,7 @@ function initialView() {
 async function loadTree() {
   const res = await fetch("/api/tree");
   const data = await res.json();
+  state.vaultRoot = data.root || state.vaultRoot;
   $("vault").textContent = data.root;
   const dot = { text: "#6b6864", pdf: "#c99537", image: "#6fa055" };
   const render = (nodes, depth) => nodes.map((node) => node.type === "dir"
@@ -1453,7 +1456,7 @@ function showSelMenu(rect) {
 function hideSelMenu() { $("sel-menu").hidden = true; }
 
 $("page").addEventListener("mouseup", (event) => {
-  if (state.mode === "image" || state.mode === "pdf") return;
+  if (state.mode === "image") return; // 图片走区域框选，不参与文字选区
   if (document.body.classList.contains("editing-doc")) return; // 编辑态由 textarea 自己处理
   const selection = window.getSelection();
   const text = String(selection).trim();
@@ -1823,28 +1826,85 @@ async function placeBoard(event) {
   toast("白板已放置 · 双击写入（白板是草稿区，不计入 Agent 约束）");
 }
 
-/* ---------------- 左栏：像 VSCode 一样打开本地文件夹 ---------------- */
-$("btn-vault").addEventListener("click", async () => {
-  const next = prompt("输入要打开的本地文件夹的绝对路径：", $("vault").textContent || "");
-  if (!next || !next.trim()) return;
+/* ---------------- 左栏：像 VSCode 一样打开本地文件夹（可视化目录选择器） ---------------- */
+const fsState = { cur: "", up: null };
+
+async function fsLoad(dir) {
+  const res = await fetch(`/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
+  if (!res.ok) { toast("无法访问该目录"); return; }
+  const data = await res.json();
+  fsState.cur = data.cur;
+  fsState.up = data.up;
+  $("fs-cur").textContent = data.cur;
+  $("fs-crumb").textContent = data.cur;
+  $("fs-quick").innerHTML = data.quick
+    .map((q) => `<button data-fs-path="${escapeHtml(q.path)}">${escapeHtml(q.name)}</button>`).join("");
+  $("fs-list").innerHTML = data.dirs.length
+    ? data.dirs.map((d) => `<div class="fs-item" data-fs-path="${escapeHtml(d.path)}"><span class="fs-ico">▸</span><span>${escapeHtml(d.name)}</span></div>`).join("")
+    : '<div class="fs-empty">（没有子文件夹 · 可直接点「打开此文件夹」）</div>';
+  $("fs-up").disabled = !data.up;
+}
+
+$("btn-vault").addEventListener("click", () => {
+  $("fs-modal").hidden = false;
+  fsLoad("");
+});
+$("fs-close").addEventListener("click", () => { $("fs-modal").hidden = true; });
+$("fs-modal").addEventListener("mousedown", (event) => {
+  if (event.target === $("fs-modal")) $("fs-modal").hidden = true; // 点遮罩关闭，点卡片内部不关
+});
+$("fs-quick").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-fs-path]");
+  if (target) fsLoad(target.dataset.fsPath);
+});
+$("fs-list").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-fs-path]");
+  if (target) fsLoad(target.dataset.fsPath);
+});
+$("fs-up").addEventListener("click", () => { if (fsState.up) fsLoad(fsState.up); });
+$("fs-open").addEventListener("click", async () => {
+  if (!fsState.cur) return;
   const res = await fetch("/api/vault", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: next.trim() }),
+    body: JSON.stringify({ path: fsState.cur }),
   });
   if (!res.ok) { toast("打开失败：目录不存在或不可访问"); return; }
   const data = await res.json();
-  state.path = null;
-  state.annotations = [];
-  $("empty").style.display = "";
-  $("docpath").textContent = "未选择文档";
+  $("fs-modal").hidden = true;
+  state.vaultRoot = data.root;
+  await resetDocView();
   await loadTree();
   toast(`已切换到 ${data.root}`);
 });
 
 /* ---------------- 外部修改感知：Agent 改完文档 = 本轮结束，自动推进批次 ---------------- */
+/* 防误判：先验服务端当前 vault。目录被其他标签页/CLI 切走时，同相对路径会读到别的文件，
+   mtime 必然变化 —— 不验 vault 就会虚推进批次（真实事故：2 秒内连推 7 轮）。 */
+async function resetDocView() {
+  state.path = null;
+  state.annotations = [];
+  $("empty").style.display = "";
+  $("docpath").textContent = "未选择文档";
+  $("doc").innerHTML = "";
+  hideSelMenu();
+}
+
 setInterval(async () => {
   if (!state.path) return;
+  try {
+    const vaultRes = await fetch("/api/vault");
+    if (vaultRes.ok) {
+      const vault = await vaultRes.json();
+      if (vault.root && state.vaultRoot && vault.root !== state.vaultRoot) {
+        state.vaultRoot = vault.root;
+        await resetDocView();
+        await loadTree();
+        toast("目录已在别处切换，请重新选择文档");
+        return;
+      }
+    }
+  } catch { /* vault 查询失败不阻塞 mtime 轮询 */ }
   const res = await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`);
   if (!res.ok) return;
   const data = await res.json();

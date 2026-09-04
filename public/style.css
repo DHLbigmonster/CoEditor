@@ -426,8 +426,8 @@ body[data-tool="arrow"] #viewport { cursor: crosshair; }
 body[data-tool="note"] #viewport { cursor: copy; }
 
 /* ---------- 手绘标注箭头 ---------- */
-#arrows { position: absolute; top: 0; left: 0; overflow: visible; }
-#arrows .arrow-g { cursor: pointer; }
+#arrows { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; } /* 关键：SVG 层会撑满世界坐标，不放行的话文档上的所有鼠标事件都被它拦截（表现为永远抓手拖画布） */
+#arrows .arrow-g { pointer-events: auto; cursor: pointer; }
 #arrows .arrow-stroke {
   fill: none; stroke-linecap: round; stroke-linejoin: round;
   stroke-width: 2.4;
@@ -707,3 +707,48 @@ body.paper-dark .note.board { background: linear-gradient(180deg, #2c2822, #241f
 #doc.docx-view table td, #doc.docx-view table th { border: 1px solid rgba(38, 35, 30, .18); padding: 8px 10px; text-align: left; }
 #doc.docx-view img { max-width: 100%; }
 #doc.docx-view a { color: #b0542f; }
+
+/* ---------- PDF 文本层标记可见性：文字透明色会让删除线也透明，显式给色 ---------- */
+#doc .pdf-text .anchor[data-kind="strike"] {
+  text-decoration: line-through;
+  text-decoration-color: rgba(224, 96, 79, .9);
+  text-decoration-thickness: 1.5px;
+}
+#doc .pdf-text .anchor { cursor: pointer; }
+
+/* ================= 文件夹选择器（可视化目录浏览器，替代手输路径） ================= */
+#fs-modal {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 8, 5, .58); backdrop-filter: blur(3px);
+}
+#fs-modal[hidden] { display: none; } /* 防 display:flex 覆盖 hidden 的老坑 */
+.fs-card {
+  width: min(560px, 92vw); max-height: 76vh;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 30px 70px rgba(8, 6, 3, .55); overflow: hidden;
+}
+.fs-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.fs-quick { display: flex; gap: 6px; padding: 0 16px 10px; flex-wrap: wrap; }
+.fs-quick button {
+  border: 1px solid var(--line); background: transparent; color: var(--ink-dim);
+  font-size: 11.5px; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.fs-quick button:hover { background: var(--panel-3); color: var(--ink); }
+.fs-crumb { padding: 0 16px 8px; font-size: 11px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.fs-list { flex: 1; min-height: 220px; overflow: auto; padding: 4px 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.fs-item {
+  padding: 7px 10px; border-radius: 7px; font-size: 12.5px; color: var(--ink-dim);
+  cursor: pointer; display: flex; gap: 8px; align-items: center;
+}
+.fs-item:hover { background: var(--panel-3); color: var(--ink); }
+.fs-item .fs-ico { opacity: .55; font-size: 10px; }
+.fs-empty { padding: 30px 16px; text-align: center; color: var(--ink-faint); font-size: 12px; }
+.fs-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
+.fs-foot code { flex: 1; font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-foot button { border: none; cursor: pointer; font-size: 12px; padding: 6px 12px; border-radius: 8px; }
+.fs-foot .primary { background: var(--accent, #de614f); color: #fff; }
+.fs-foot .ghost { background: rgba(236, 231, 221, .07); color: var(--ink-dim); }
+.fs-foot button:disabled { opacity: .4; cursor: default; }

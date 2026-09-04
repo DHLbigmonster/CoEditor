@@ -3,3 +3,4 @@
 **/.marginalia/ui-state.json
 .DS_Store
 node_modules/
+**/.marginalia/*.bak*

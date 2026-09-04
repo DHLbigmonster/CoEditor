@@ -2,6 +2,7 @@ import http from "node:http";
 import { readFileSync } from "node:fs";
 import { readFile, writeFile, mkdir, stat, readdir, rename } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
@@ -239,6 +240,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     /* ---------- 切换 vault（VSCode 式打开本地文件夹） ---------- */
+    if (url.pathname.startsWith("/api/vault") && req.method === "GET") {
+      // 页面轮询先验 vault：服务端目录被其他端切换时，避免用同相对路径读到别的文件而误判「外部修改」
+      return send(200, JSON.stringify({ root: ROOT }));
+    }
     if (url.pathname.startsWith("/api/vault") && req.method === "POST") {
       const body = await new Promise((ok) => {
         let raw = "";
@@ -250,6 +255,26 @@ const server = http.createServer(async (req, res) => {
       if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
       setVault(next);
       return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
+    }
+
+    /* ---------- 文件夹选择器：可视化目录浏览数据源（只列子目录，不读文件内容） ---------- */
+    if (url.pathname.startsWith("/api/fs") && req.method === "GET") {
+      const raw = String(url.searchParams.get("dir") || "").trim();
+      const cur = raw ? resolve(raw) : homedir();
+      const info = await stat(cur).catch(() => null);
+      if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
+      const entries = await readdir(cur, { withFileTypes: true }).catch(() => []);
+      const dirs = entries
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+        .map((entry) => ({ name: entry.name, path: join(cur, entry.name) }))
+        .sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
+      const quick = [];
+      for (const [name, p] of [["主目录", homedir()], ["桌面", join(homedir(), "Desktop")], ["文档", join(homedir(), "Documents")], ["下载", join(homedir(), "Downloads")]]) {
+        const qi = await stat(p).catch(() => null);
+        if (qi && qi.isDirectory()) quick.push({ name, path: p });
+      }
+      const parent = dirname(cur);
+      return send(200, JSON.stringify({ cur, up: parent === cur ? null : parent, dirs, quick }));
     }
 
     if (url.pathname.startsWith("/api/supersede")) {
