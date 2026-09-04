@@ -543,7 +543,11 @@ const server = http.createServer(async (req, res) => {
           x: Number.isFinite(body.x) ? body.x : 850,
           y: Number.isFinite(body.y) ? body.y : 0,
           region: body.region && ["x", "y", "w", "h"].every((k) => Number.isFinite(body.region[k]))
-            ? { x: body.region.x, y: body.region.y, w: body.region.w, h: body.region.h }
+            ? {
+                x: body.region.x, y: body.region.y, w: body.region.w, h: body.region.h,
+                // PDF 区域批注：page 为文档内页码（图片/内嵌图区域无 page）
+                ...(Number.isFinite(body.region.page) ? { page: body.region.page } : {}),
+              }
             : null,
           image: typeof body.image === "string" && body.image ? body.image : null,
           created: new Date().toISOString(),

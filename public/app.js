@@ -268,11 +268,11 @@ function cardElement(annotation) {
       <span class="c-id">${annotation.id}</span>
       <span class="c-round${isCurrentRound ? " cur" : ""}" title="批次：同一轮迭代里写的批注">R${roundNo}</span>
       ${KIND_BADGE[annotation.kind] || ""}
-      <span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>
+      ${annotation.status !== "active" ? `<span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>` : ""}
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
       ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.join("/")}</span>` : ""}
-      <span class="c-weight" title="权重 ${Number(annotation.weight ?? 1).toFixed(2)}">${weightDots(annotation.weight)}</span>
+      ${Number(annotation.weight ?? 1) < 1 ? `<span class="c-weight" title="权重 ${Number(annotation.weight ?? 1).toFixed(2)}">${weightDots(annotation.weight)}</span>` : ""}
     </div>
     <div class="c-body">${escapeHtml(annotation.body || (annotation.kind === "highlight" ? "（高亮标记 · 提醒 Agent 此处重要）" : annotation.kind === "strike" ? "（删除线标记 · 建议删除此段）" : ""))}</div>
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
@@ -417,6 +417,10 @@ function drawLines() {
 /* ---------------- 图片节点：区域批注与标注导出 ---------------- */
 function findRegionLayer(annotation) {
   if (state.mode === "image") return $("region-layer");
+  if (state.mode === "pdf" && annotation.region && Number.isFinite(annotation.region.page)) {
+    const pageEl = $("doc").querySelector(`.pdf-page[data-page="${annotation.region.page}"]`);
+    return pageEl ? pageEl.querySelector(".region-layer") : null;
+  }
   const target = annotation.image || "";
   for (const fig of $("doc").querySelectorAll("figure.inline-image")) {
     if (fig.dataset.image === target) return fig.querySelector(".region-layer");
@@ -1191,6 +1195,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "n" || event.key === "N") setTool("note");
   if (event.key === "i" || event.key === "I") $("file-input").click();
   if (event.key === "w" || event.key === "W") setTool("board");
+  if (event.key === "r" || event.key === "R") setTool("region");
   if (event.key === "Escape") { selectCanvas(null); setTool("select"); }
   if (event.key === "?" || (event.shiftKey && event.key === "/")) {
     const help = $("shortcut-help");
@@ -1457,6 +1462,7 @@ function hideSelMenu() { $("sel-menu").hidden = true; }
 
 $("page").addEventListener("mouseup", (event) => {
   if (state.mode === "image") return; // 图片走区域框选，不参与文字选区
+  if (state.canvasTool === "region") return; // 区域工具拖框中：不触发文字浮条（且不 stopPropagation 挡掉 region 的 mouseup 监听）
   if (document.body.classList.contains("editing-doc")) return; // 编辑态由 textarea 自己处理
   const selection = window.getSelection();
   const text = String(selection).trim();
@@ -1636,9 +1642,73 @@ $("bar-pdf-cols").addEventListener("click", async (event) => {
   await loadAnnotations(); // 重渲染 + 批注重锚定（文本层重建）
 });
 
+/* ---------------- PDF 区域框选（苹果预览式）：区域工具 + 拖拽画框 ---------------- */
+function startPdfRegionDraft(event) {
+  const pageEl = event.target.closest(".pdf-page");
+  if (!pageEl) return;
+  event.preventDefault(); // 阻止浏览器启动文字选择——否则拖框会同时选字、触发浮条流
+  const viewport = $("viewport");
+  const vpRect = viewport.getBoundingClientRect();
+  const pageRect = pageEl.getBoundingClientRect();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const draft = document.createElement("div");
+  draft.className = "region-draft";
+  viewport.appendChild(draft);
+  const move = (moveEvent) => {
+    const x1 = Math.min(startX, moveEvent.clientX) - vpRect.left;
+    const y1 = Math.min(startY, moveEvent.clientY) - vpRect.top;
+    const x2 = Math.max(startX, moveEvent.clientX) - vpRect.left;
+    const y2 = Math.max(startY, moveEvent.clientY) - vpRect.top;
+    draft.style.left = `${x1}px`;
+    draft.style.top = `${y1}px`;
+    draft.style.width = `${x2 - x1}px`;
+    draft.style.height = `${y2 - y1}px`;
+  };
+  const up = (upEvent) => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    draft.remove();
+    // clamp 到页面矩形内，归一化为页相对坐标（缩放/平移无关，列切换重渲染后自动复位）
+    const rx1 = Math.max(pageRect.left, Math.min(startX, upEvent.clientX));
+    const ry1 = Math.max(pageRect.top, Math.min(startY, upEvent.clientY));
+    const rx2 = Math.min(pageRect.right, Math.max(startX, upEvent.clientX));
+    const ry2 = Math.min(pageRect.bottom, Math.max(startY, upEvent.clientY));
+    const w = rx2 - rx1;
+    const h = ry2 - ry1;
+    if (w < 12 || h < 12) return;
+    const pageNo = Number(pageEl.dataset.page);
+    const region = {
+      page: pageNo,
+      x: (rx1 - pageRect.left) / pageRect.width,
+      y: (ry1 - pageRect.top) / pageRect.height,
+      w: w / pageRect.width,
+      h: h / pageRect.height,
+    };
+    pending = {
+      kind: "region",
+      quote: `第 ${pageNo} 页 区域 (${region.x.toFixed(2)}, ${region.y.toFixed(2)})`,
+      prefix: "",
+      suffix: "",
+      region,
+      worldY: toWorld(rx1 + w / 2, ry1 + h / 2).y,
+    };
+    const composer = $("composer");
+    composer.hidden = false;
+    composer.style.top = `${Math.min(upEvent.clientY + 12, window.innerHeight - 220)}px`;
+    composer.style.left = `${Math.min(upEvent.clientX, window.innerWidth - 360)}px`;
+    $("composer-quote").textContent = `框选第 ${pageNo} 页区域 · 宽 ${Math.round(region.w * 100)}% × 高 ${Math.round(region.h * 100)}%`;
+    $("composer-input").focus();
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
+
 /* ---------------- 画布交互 ---------------- */
 $("viewport").addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
+  // PDF 区域框选（苹果预览式）：区域工具激活时，落在 PDF 页上的拖拽画框选批注
+  if (state.canvasTool === "region" && event.target.closest(".pdf-page")) { startPdfRegionDraft(event); return; }
   if (event.target.closest(".card") || event.target.closest("#page") || event.target.closest("#composer") || event.target.closest(".note") || event.target.closest(".arrow-g")) return;
   if (state.canvasTool === "arrow") { startArrowDraft(event); return; }
   if (state.canvasTool === "board") { placeBoard(event); setTool("select"); return; }

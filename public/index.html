@@ -80,6 +80,9 @@
       <button class="tool" data-tool="board" title="白板：点击画布放置一块可写的白板（W）">
         <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 14 v3 M7 17 h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
+      <button class="tool" data-tool="region" title="区域批注：在 PDF 页上拖拽框选一块区域加批注（R）">
+        <svg viewBox="0 0 20 20"><rect x="4" y="5" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.4"/></svg>
+      </button>
       <span class="tool-sep"></span>
       <span class="swatches" id="swatches" title="箭头颜色">
         <button class="swatch red active" data-color="red" title="红"></button>
@@ -104,6 +107,7 @@
           <tr><td><kbd>A</kbd></td><td>标注箭头（拖画，<8px 自动取消，建完即写标签）</td></tr>
           <tr><td><kbd>N</kbd></td><td>便签（点击画布放置）</td></tr>
           <tr><td><kbd>W</kbd></td><td>白板（点击画布放置，草稿区不计入约束）</td></tr>
+          <tr><td><kbd>R</kbd></td><td>区域批注（在 PDF 页上拖拽框选，苹果预览式）</td></tr>
           <tr><td><kbd>I</kbd></td><td>贴图（也可拖图 / ⌘V 粘贴进画布）</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>回选择工具 / 取消输入</td></tr>
           <tr><td><kbd>Delete</kbd></td><td>删除选中的箭头 / 便签 / 图卡 / 草稿卡</td></tr>

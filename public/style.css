@@ -210,7 +210,7 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
 
 .card {
   position: absolute; width: 300px;
-  padding: 14px 15px 12px;
+  padding: 12px 14px 11px;
   background: var(--panel-2);
   border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
@@ -218,7 +218,7 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
   transition: top .42s cubic-bezier(.22, 1, .36, 1), left .42s cubic-bezier(.22, 1, .36, 1), opacity .2s, box-shadow .18s, background .18s;
 }
 .card::before {
-  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px;
+  content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px;
   border-radius: 0 3px 3px 0; background: var(--active);
 }
 .card:hover { box-shadow: var(--shadow-deep); background: var(--panel-3); }
@@ -238,7 +238,7 @@ body.focus-active #lines path:not([data-status="active"]) { opacity: .1 !importa
 body.lines-quiet #lines path { opacity: .07 !important; }
 body.lines-quiet #lines path.lit { opacity: .9 !important; }
 
-.c-head { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+.c-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
 .c-id { font: 500 11px/1 "SF Mono", Menlo, monospace; color: var(--ink); letter-spacing: .04em; }
 .c-badge {
   font-size: 10px; padding: 2px 8px; border-radius: 20px;
@@ -424,6 +424,8 @@ body.paper-dark #doc .pdf-page { background: #fff; }
 .swatch.active { border-color: #fff; transform: scale(1.2); box-shadow: 0 0 10px rgba(255, 255, 255, .25); }
 body[data-tool="arrow"] #viewport { cursor: crosshair; }
 body[data-tool="note"] #viewport { cursor: copy; }
+body[data-tool="region"] #viewport { cursor: crosshair; }
+body[data-tool="region"] #doc { cursor: crosshair; }
 
 /* ---------- 手绘标注箭头 ---------- */
 #arrows { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; } /* 关键：SVG 层会撑满世界坐标，不放行的话文档上的所有鼠标事件都被它拦截（表现为永远抓手拖画布） */

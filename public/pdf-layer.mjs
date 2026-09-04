@@ -43,6 +43,11 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
     layer.style.height = `${viewport.height}px`;
     wrapper.appendChild(layer);
 
+    // 区域批注层（苹果预览式框选）：在文本层之上，pointer-events:none 不挡文字选择
+    const regions = document.createElement("div");
+    regions.className = "region-layer";
+    wrapper.appendChild(regions);
+
     container.appendChild(wrapper);
 
     const context = canvas.getContext("2d");
