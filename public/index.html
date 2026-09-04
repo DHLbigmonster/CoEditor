@@ -194,6 +194,7 @@
 
 <script>
 window.addEventListener("error", (e) => {
+  if (e.message && e.message.includes("ResizeObserver loop")) return; // 良性警告：下一帧自愈，别污染用户提示
   const t = document.getElementById("toast");
   if (t) { t.textContent = "JS错误: " + e.message + " @" + (e.filename||"") + ":" + (e.lineno||""); t.className = "show err"; }
 });

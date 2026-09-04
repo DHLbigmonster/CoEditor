@@ -1704,8 +1704,12 @@ function bindHtmlInlineEdit(frame) {
   if (!inner || !inner.body) return;
   inner.addEventListener("dblclick", (event) => {
     if (state.workspaceMode !== "read") return;
+    // target 可能是渲染后插入的 mark.anchor（无 data-coedit）——向上爬到最近的映射祖先
+    let mapped = event.target;
+    while (mapped && mapped.nodeType === 1 && !mapped.getAttribute("data-coedit")) mapped = mapped.parentElement;
+    if (!mapped || mapped === inner.documentElement) { toast("这里不支持直接改文字"); return; }
     let editable = null;
-    let cursor = event.target;
+    let cursor = mapped;
     for (let hop = 0; cursor && cursor.nodeType === 1 && hop < 5; hop += 1) {
       const kids = [...cursor.childNodes];
       const plain = kids.length > 0 && kids.every((n) => n.nodeType === 3 || (n.nodeType === 1 && n.matches("mark.anchor")));

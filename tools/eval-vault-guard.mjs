@@ -1,14 +1,12 @@
-// 回归：vault 切换防护 —— 复现「服务端切目录 + 旧标签页轮询 mtime 误判 → 批次虚推进」事故
-// 步骤：切到副本 vault → 打开 md 标签页（模拟用户）→ 服务端切走 vault（模拟另一标签页操作）
-//       → 等 2 个轮询周期 → 断言：① 旧标签页视图被重置（未误读新目录同名文件）② 副本 activeRound 未被推进
+// vault 切换守卫回归：服务端切目录时，页面轮询不得虚推进批次，且视图正确重置
+// 前置：server 已在 BASE 上以 VAULT 为根运行（battery 编排器负责）
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
-
-const COPY = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-e2e-vault";
-const roundBefore = await (await fetch("http://127.0.0.1:4401/api/rounds")).json();
-
+const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
+const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-m7-vault"; // 页面当前所在 vault
+const AWAY = process.env.COEDITOR_E2E_AWAY || "/tmp";                    // 切走的目标（须与 VAULT 不同）
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4401"));
-if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json(); }
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith(BASE));
+if (!page) { page = await (await fetch(`http://127.0.0.1:9333/json/new?${BASE}`, { method: "PUT" })).json(); }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pending = new Map();
 const send = (method, params = {}) => new Promise((res, rej) => {
@@ -22,31 +20,35 @@ ws.on("message", (d) => {
 await new Promise((r) => ws.on("open", r));
 const evalv = async (expr) => {
   const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-  if (ev.exceptionDetails) throw new Error(JSON.stringify(ev.exceptionDetails).slice(0, 300));
+  if (ev.exceptionDetails) throw new Error("eval: " + JSON.stringify(ev.exceptionDetails).slice(0, 400));
   return ev.result ? ev.result.value : undefined;
 };
+import { mkdirSync } from "node:fs";
+mkdirSync(AWAY, { recursive: true }); // 切走目标必须存在，否则 POST /api/vault 400、切走静默失败
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const postVault = (path) => fetch(`${BASE}/api/vault`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+const rounds = async () => (await (await fetch(`${BASE}/api/rounds`)).json());
 
-// 1) 切到副本 vault，打开 md（标签页 state.vaultRoot = 副本）
-await fetch("http://127.0.0.1:4401/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: COPY }) });
-await send("Page.navigate", { url: "http://127.0.0.1:4401/?doc=" + encodeURIComponent("研究设计笔记.md") });
-await sleep(2500);
-const before = await evalv(`({ path: state ? undefined : undefined, vaultRoot: (window.state||{}).vaultRoot || "n/a", doc: !!document.getElementById("doc").innerHTML.length })`);
-
-// 2) 服务端切走 vault（模拟另一个标签页里选了别的文件夹）
-await fetch("http://127.0.0.1:4401/api/vault", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/Users/chaos/WorkBuddy/2026-09-03-22-03-32/backups/coeditor-desktop-before-m7-1558/sample" }) });
-
-// 3) 等 2 个轮询周期（4s interval）
+const roundBefore = await rounds();
+// ① 页面在 VAULT 上打开 md
+await send("Page.navigate", { url: `${BASE}/?doc=` + encodeURIComponent("研究设计笔记.md") });
+await sleep(2400);
+// ② 服务端切走 vault（模拟另一端选择了别的文件夹）
+await postVault(AWAY);
+// ③ 等 2 个轮询周期
 await sleep(9500);
-const after = await evalv(`({ emptyShown: document.getElementById("empty").style.display !== "none", docEmpty: !document.getElementById("doc").innerHTML.length, treeCleared: !document.querySelectorAll("#tree .file").length })`);
-const roundAfter = await (await fetch("http://127.0.0.1:4401/api/rounds")).json();
-
+const after = await evalv(`(() => ({
+  emptyShown: document.getElementById("empty").style.display !== "none",
+  docEmpty: !document.getElementById("doc").innerHTML.length,
+}))()`);
+// ④ 切回（rounds 必须在切回后读——AWAY 是空目录，读到的是它的空 sidecar）
+await postVault(VAULT);
+await sleep(800);
+const roundAfter = await rounds();
 console.log("GUARD:" + JSON.stringify({
-  before,
   after,
   activeRound_before: roundBefore.activeRound,
   activeRound_after: roundAfter.activeRound,
-  guardWorked: after.emptyShown === true && after.docEmpty === true, // 旧标签页被重置而非误读新目录
-}, null, 1));
-ws.close();
-process.exit(0);
+  guardWorked: after.emptyShown === true && after.docEmpty === true && roundBefore.activeRound === roundAfter.activeRound,
+}));
+ws.close(); process.exit(0);

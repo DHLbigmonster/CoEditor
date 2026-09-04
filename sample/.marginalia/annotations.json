@@ -405,12 +405,12 @@
         "suffix": "。\n本文为演示页面：选中任意句子即可弹出批注 / 高亮 / 删除线菜单，荧光标记",
         "body": "",
         "x": 850,
-        "y": 349.0000406901042,
+        "y": 349,
         "region": null,
         "image": null,
         "created": "2026-09-04T05:10:22.350Z",
-        "status": "deprecated",
-        "weight": 0,
+        "status": "active",
+        "weight": 1,
         "history": [
           {
             "event": "created",
@@ -419,6 +419,26 @@
           {
             "event": "deprecated",
             "at": "2026-09-04T08:51:45.526Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T10:01:54.371Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T10:01:58.006Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T10:01:58.180Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T10:01:59.176Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T10:02:04.199Z"
           }
         ],
         "supersedes": [],
@@ -584,8 +604,8 @@
         "prefix": "\n",
         "suffix": "\n\n",
         "body": "测试",
-        "x": 850,
-        "y": 577,
+        "x": 760,
+        "y": 572,
         "region": null,
         "image": null,
         "created": "2026-09-04T08:50:53.611Z",
@@ -611,6 +631,10 @@
           {
             "event": "moved",
             "at": "2026-09-04T08:51:22.444Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T10:01:51.542Z"
           }
         ],
         "supersedes": [],
@@ -651,6 +675,183 @@
           {
             "event": "created",
             "at": "2026-09-04T06:38:49.434Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      }
+    ],
+    "项目简报-山月斋数字化试点.docx": [
+      {
+        "id": "A-0001",
+        "kind": "text",
+        "round": 5,
+        "quote": "班效率与缺货率下降",
+        "prefix": "其余作为对照组。二、关键发现试点门店季度坪效较对照组提升约 9.7%，主要来自排",
+        "suffix": "。该口径含外卖业务，与正文第三章口径不一致，讨论时需注意。会员渗透率在试点组提升",
+        "body": "测试？",
+        "x": 850,
+        "y": 474.5,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T09:55:48.646Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T09:55:48.646Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:12.825Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:16.415Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:17.395Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-04T09:56:19.647Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:20.927Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:21.995Z"
+          },
+          {
+            "event": "addressed",
+            "at": "2026-09-04T09:56:23.412Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:25.697Z"
+          },
+          {
+            "event": "addressed",
+            "at": "2026-09-04T09:56:30.066Z"
+          },
+          {
+            "event": "addressed",
+            "at": "2026-09-04T09:56:32.298Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:45.580Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      },
+      {
+        "id": "A-0002",
+        "kind": "text",
+        "round": 5,
+        "quote": "是数字化带来的自然增长。\n\n三、下一步安排",
+        "prefix": "章口径不一致，讨论时需注意。会员渗透率在试点组提升 4.2 个百分点，但无法区分",
+        "suffix": "Q3 前完成剩余 44 家门店上线；Q4 启动加盟门店试点，样本量另定。指标试点",
+        "body": "1",
+        "x": 856.08,
+        "y": 309.562,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T09:55:56.195Z",
+        "status": "deprecated",
+        "weight": 0,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T09:55:56.195Z"
+          },
+          {
+            "event": "anchor_lost",
+            "at": "2026-09-04T09:55:56.354Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:55:59.325Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:07.246Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:08.665Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:10.230Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:11.394Z"
+          },
+          {
+            "event": "anchor_lost",
+            "at": "2026-09-04T09:56:11.546Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:12.291Z"
+          },
+          {
+            "event": "moved",
+            "at": "2026-09-04T09:56:42.610Z"
+          },
+          {
+            "event": "revive",
+            "at": "2026-09-04T09:56:44.029Z"
+          },
+          {
+            "event": "anchor_lost",
+            "at": "2026-09-04T09:56:44.188Z"
+          },
+          {
+            "event": "addressed",
+            "at": "2026-09-04T09:56:48.065Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-04T09:56:49.447Z"
+          },
+          {
+            "event": "deprecated",
+            "at": "2026-09-04T09:56:50.330Z"
+          }
+        ],
+        "supersedes": [],
+        "conflicts_with": [],
+        "offsets": null
+      },
+      {
+        "id": "A-0003",
+        "kind": "text",
+        "round": 5,
+        "quote": "百分点，但无法区分是数字化",
+        "prefix": "卖业务，与正文第三章口径不一致，讨论时需注意。会员渗透率在试点组提升 4.2 个",
+        "suffix": "带来的自然增长。三、下一步安排Q3 前完成剩余 44 家门店上线；Q4 启动加盟",
+        "body": "2",
+        "x": 850,
+        "y": 746.5,
+        "region": null,
+        "image": null,
+        "created": "2026-09-04T09:56:05.679Z",
+        "status": "active",
+        "weight": 1,
+        "history": [
+          {
+            "event": "created",
+            "at": "2026-09-04T09:56:05.679Z"
           }
         ],
         "supersedes": [],
@@ -720,8 +921,8 @@
     },
     {
       "id": "N-0004",
-      "x": -113.6751497005988,
-      "y": 954.7200598802395,
+      "x": 877.0956873844419,
+      "y": 608.9409684797442,
       "text": "",
       "type": "note",
       "doc": "读书笔记/信息的模样.md",
@@ -738,8 +939,8 @@
     },
     {
       "id": "N-0006",
-      "x": 57.78053542676295,
-      "y": 398.25515380454647,
+      "x": 737.5900741418577,
+      "y": 322.97820380938407,
       "text": "",
       "type": "board",
       "doc": "读书笔记/信息的模样.md",
@@ -760,7 +961,7 @@
   "drafts": [],
   "demo": true,
   "note": "示例 vault：所有文档与数据均为虚构，仅用于演示 CoEditor。",
-  "activeRound": 5,
+  "activeRound": 6,
   "roundHistory": [
     {
       "round": 0,
@@ -781,6 +982,10 @@
     {
       "round": 4,
       "closedAt": "2026-09-04T08:28:02.141Z"
+    },
+    {
+      "round": 5,
+      "closedAt": "2026-09-04T09:56:53.692Z"
     }
   ]
 }

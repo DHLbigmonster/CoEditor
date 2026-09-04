@@ -27,8 +27,9 @@ const realClick = async (x, y) => {
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x), y: Math.round(y), button: "left", buttons: 0, clickCount: 1 });
 };
 
+const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-m7-vault";
 const sidecar = () => {
-  const s = JSON.parse(readFileSync("/tmp/coeditor-m7-vault/.marginalia/annotations.json", "utf8"));
+  const s = JSON.parse(readFileSync(`${VAULT}/.marginalia/annotations.json`, "utf8"));
   return { arrows: s.arrows.length, notes: s.notes.length, boards: s.notes.filter((n) => n.type === "board").length };
 };
 const before = sidecar();
@@ -42,7 +43,7 @@ await sleep(600);
 const spot = await evalv(`(() => {
   const vp = document.getElementById("viewport").getBoundingClientRect();
   const jit = (n) => Math.floor(Math.random() * n * 2) - n; // 随机偏移：脚本可在同一 vault 上重复运行
-  return { x: vp.left + vp.width - 120 + jit(140), y: vp.top + 320 + jit(120) };
+  return { x: vp.left + vp.width - 120 + jit(120), y: vp.top + 170 + jit(90) };
 })()`);
 
 /* ① 箭头（A 工具真实拖画，含标签弹层） */
@@ -61,13 +62,13 @@ const afterArrow = sidecar();
 
 /* ② 便签（N 工具点击放置） */
 await evalv(`setTool('note')`);
-await realClick(spot.x - 200, spot.y + 120);
+await realClick(spot.x - 200, spot.y + 150);
 await sleep(600);
 const afterNote = sidecar();
 
 /* ③ 白板（W 工具点击放置） */
 await evalv(`setTool('board')`);
-await realClick(spot.x - 200, spot.y + 520);
+await realClick(spot.x - 200, spot.y + 330);
 await sleep(600);
 const afterBoard = sidecar();
 
