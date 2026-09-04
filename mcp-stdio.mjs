@@ -448,7 +448,7 @@ async function handleRequest(message) {
       return {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "coeditor", version: "0.2.0" },
+        serverInfo: { name: "coeditor", version: "0.8.1" },
       };
     }
     if (message.method === "tools/list") {

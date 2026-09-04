@@ -1321,7 +1321,7 @@ function reportUiState() {
   fetch("/api/ui-state", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: state.path, selected: selection }),
+    body: JSON.stringify({ path: state.path, workspaceMode: state.workspaceMode, editing: document.body.classList.contains("editing-doc"), selected: selection }),
   }).catch(() => {});
 }
 
