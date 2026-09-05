@@ -1,18 +1,106 @@
-// 版本对照闭环 E2E：登记 → 列表 → diff → 验收 → 继续批注新版本
+// 版本对照闭环 E2E（v0.9.10 重做）：不可再「功能坏了也能通过」。
+// 覆盖：登记幂等 / 同文件多路径拒绝 / 按 id 验收不验收错对象 / 内容漂移拒绝验收 /
+//       顺序敏感 diff（段落重排必须被发现）/ 服务端保留继承（幂等 + 缺失报警）/ UI 真实跳转
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
-import { mkdtemp, writeFile, mkdir, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-versions-vault";
+const DOC = "茶事方案.md";
 
-// 原文 + 新版本（Agent 产出，放在旁边）
+// 套件自带全新 vault：登记/验收状态是断言的一部分，残留的上一轮状态会让断言失真
+await rm(VAULT, { recursive: true, force: true });
 await mkdir(VAULT, { recursive: true });
-await writeFile(join(VAULT, "茶事方案.md"), "# 春季上新\n\n先读这一段。\n\n把预算花在原料和第一次体验上。\n");
+await writeFile(join(VAULT, DOC), "# 春季上新\n\n先读这一段。\n\n把预算花在原料和第一次体验上。\n");
 await writeFile(join(VAULT, "茶事方案-v2.md"), "# 春季上新\n\n先读这一段。\n\n把预算花在原料、包装和第一次体验上，让产品成为被记住的理由。\n\n补充：上线两周后同时看试饮转化与复购。\n");
+await writeFile(join(VAULT, "茶事方案-v3.md"), "# 春季上新\n\n先读这一段。\n\n把预算花在原料、包装和第一次体验上，让产品成为被记住的理由。\n\n补充：上线两周后同时看试饮转化与复购。\n\n新增：与门店联名做主题杯。\n");
+await writeFile(join(VAULT, "顺序测试.md"), "# 重排\n\n第一段，讲原料。\n\n第二段，讲包装。\n");
+await writeFile(join(VAULT, "顺序测试-v2.md"), "# 重排\n\n第二段，讲包装。\n\n第一段，讲原料。\n");
+await writeFile(join(VAULT, "缺失测试.md"), "# 报告\n\n这段必须保留。\n\n其他内容。\n");
+await writeFile(join(VAULT, "缺失测试-v2.md"), "# 报告\n\n完全不同的内容，保留的原文已经不在。\n");
+
+const post = async (path, body) => {
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+};
+const getVersions = async (doc) => (await (await fetch(`${BASE}/api/versions?p=${encodeURIComponent(doc)}`)).json()).versions || [];
+const getAnnotations = async (doc) => (await (await fetch(`${BASE}/api/annotations?p=${encodeURIComponent(doc)}`)).json()).annotations || [];
+const result = {};
+
+/* ---- A1. 原文建「保留」标注（后续继承与缺失场景的源头） ---- */
+await post(`/api/annotations?p=${encodeURIComponent(DOC)}`, { kind: "highlight", quote: "先读这一段", prefix: "", suffix: "", body: "这句开场白不能动" });
+
+/* ---- A2. 登记 v2：必须拿到不可变 id + 内容哈希 + 快照 ---- */
+const reg = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: "茶事方案-v2.md", note: "补充复购指标" });
+result.registered = reg.json.ok === true;
+result.hasIdAndHash = Boolean(reg.json.version && /^v-/.test(reg.json.version.id || "") && reg.json.version.nextHash);
+const v2id = reg.json.version && reg.json.version.id;
+result.snapshotSaved = Boolean(reg.json.version && reg.json.version.snapshot && await readFile(join(VAULT, reg.json.version.snapshot.next)).then(() => true).catch(() => false));
+
+/* ---- A3. 与原件相同的文件必须拒绝：直接同名 + ./ 相对路径写法 ---- */
+const dup = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: DOC });
+const dupDot = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: "./" + DOC });
+result.dupRejected = !!dup.json.error;
+result.sameFileRejected = !!dupDot.json.error;
+
+/* ---- A4. 同内容重复登记 = 幂等：不堆叠、不重置状态 ---- */
+const before = await getVersions(DOC);
+await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: "茶事方案-v2.md", note: "重复登记" });
+const after = await getVersions(DOC);
+result.idempotentRegister = before.length === after.length && after.filter(v => v.id === v2id).length === 1;
+
+/* ---- A5. 验收错位复现：用户视图停在 v2 → Agent 又登记 v3 → 用户点验收 → 验收的必须是 v2 ---- */
+await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "decide", id: v2id, status: "accepted" });
+await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: "茶事方案-v3.md", note: "联名主题杯" });
+const list5 = await getVersions(DOC);
+const v2Entry = list5.find(v => v.id === v2id);
+const v3Entry = list5.find(v => v.file === "茶事方案-v3.md");
+result.acceptedRightVersion = v2Entry && v2Entry.status === "accepted" && v3Entry && v3Entry.status === "pending";
+
+/* ---- A6. 内容漂移：改掉 v3 文件再验收 → 必须被拒绝且状态不变 ---- */
+const v3idOld = v3Entry.id;
+await writeFile(join(VAULT, "茶事方案-v3.md"), (await readFile(join(VAULT, "茶事方案-v3.md"), "utf8")) + "\n版本备注：登记后内容被改过。\n");
+const drift = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "decide", id: v3idOld, status: "accepted" });
+const list6 = await getVersions(DOC);
+result.driftBlocked = drift.status === 409 && drift.json.error === "version-content-changed" && list6.find(v => v.id === v3idOld).status === "pending";
+
+/* ---- A7. 内容变化后的重新登记 = 新条目（旧登记保留历史），新条目可正常验收 ---- */
+const reReg = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: "茶事方案-v3.md", note: "内容更新后重新登记" });
+const v3idNew = reReg.json.version && reReg.json.version.id;
+result.driftCreatesNewEntry = Boolean(v3idNew && v3idNew !== v3idOld);
+const reDecide = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "decide", id: v3idNew, status: "accepted" });
+result.reDecideOk = reDecide.status === 200;
+
+/* ---- A8. 顺序敏感 diff：段落重排必须显示为「删旧 + 增新」，不得抹成毫无变化 ---- */
+await post(`/api/versions?p=${encodeURIComponent("顺序测试.md")}`, { action: "register", file: "顺序测试-v2.md" });
+const reorder = await (await fetch(`${BASE}/api/versions/diff?p=${encodeURIComponent("顺序测试.md")}&file=${encodeURIComponent("顺序测试-v2.md")}`)).json();
+result.reorderDetected = Boolean(reorder.diff && reorder.diff.orderAware && reorder.diff.summary.added === 1 && reorder.diff.summary.removed === 1);
+
+/* ---- A9. 服务端保留继承：继承 → 幂等 → 原文缺失报警 ---- */
+const annBefore = (await getAnnotations("茶事方案-v3.md")).length;
+const carry1 = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "carry", to: "茶事方案-v3.md" });
+const anns3 = await getAnnotations("茶事方案-v3.md");
+const carriedAnns = anns3.filter(a => a.carriedFrom);
+result.carryOnce = carry1.json.ok === true && carriedAnns.length === 1 && carriedAnns[0].quote === "先读这一段" && carriedAnns[0].body === "这句开场白不能动";
+const carry2 = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "carry", to: "茶事方案-v3.md" });
+result.carryIdempotent = carry2.json.ok === true && carry2.json.carried.length === 0 && carry2.json.skipped.length === 1 && (await getAnnotations("茶事方案-v3.md")).length === anns3.length;
+await post(`/api/annotations?p=${encodeURIComponent("缺失测试.md")}`, { kind: "highlight", quote: "这段必须保留", prefix: "", suffix: "", body: "不可删除" });
+const carry3 = await post(`/api/versions?p=${encodeURIComponent("缺失测试.md")}`, { action: "carry", to: "缺失测试-v2.md" });
+const missingAnns = (await getAnnotations("缺失测试-v2.md")).filter(a => a.carriedFrom);
+result.carryMissingFlagged = carry3.json.ok === true && carry3.json.missing.length === 1 && missingAnns.length === 1 && missingAnns[0].anchorStatus === "missing" && (missingAnns[0].body || "").includes("保留内容缺失");
+
+/* ---- B. UI：面板 / 未变化措辞 / 漂移黄条 / 验收落在本尊 / 真实跳转且保留已继承 ----
+   UI 层用干净的「验收错位测试」文档，完整复现报告场景：
+   用户看到 v2 → Agent 又登记新版本（列表移位）→ 用户点验收 → 被验收的必须是用户看到的那个 */
+await writeFile(join(VAULT, "验收错位测试.md"), "# 验收错位\n\n开场白不能动。\n\n正文一。\n");
+await writeFile(join(VAULT, "验收错位测试-v2.md"), "# 验收错位\n\n开场白不能动。\n\n正文一改。\n\n新增段落。\n");
+await writeFile(join(VAULT, "验收错位测试-v4.md"), "# 验收错位\n\n开场白不能动。\n\n正文一改。\n\n新增段落。\n\n再补一段。\n");
+await post(`/api/annotations?p=${encodeURIComponent("验收错位测试.md")}`, { kind: "highlight", quote: "开场白不能动", prefix: "", suffix: "", body: "不可动" });
+const uiReg = await post(`/api/versions?p=${encodeURIComponent("验收错位测试.md")}`, { action: "register", file: "验收错位测试-v2.md", note: "UI 验收对象" });
+const uiIdA = uiReg.json.version && uiReg.json.version.id;
 
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").includes("4401"));
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith(BASE));
 if (!page) { page = await (await fetch(`http://127.0.0.1:9333/json/new?${BASE}`, { method: "PUT" })).json(); }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pm = new Map();
@@ -25,82 +113,78 @@ const evalv = async (expr) => {
   return ev.result ? ev.result.value : undefined;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const result = {};
+const openVersionsTab = `(() => {
+  const pending = document.querySelector('[data-feedback="pending"]');
+  if (pending) pending.click();
+  const tab = document.querySelector('[data-feedback="versions"]');
+  if (tab) tab.click();
+  return !!tab;
+})()`;
 
-// ⓪ 原文档先建一条「保留」标记（验证后续继承）
-await (await fetch(`${BASE}/api/annotations?p=` + encodeURIComponent("茶事方案.md"), {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ kind: "highlight", quote: "先读这一段", prefix: "", suffix: "", body: "这句开场白不能动" }),
-})).json();
-
-// ① API 登记（模拟 Agent 调 register_version）
-const reg = await (await fetch(`${BASE}/api/versions?p=` + encodeURIComponent("茶事方案.md"), {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ action: "register", file: "茶事方案-v2.md", note: "补充复购指标" }),
-})).json();
-result.registered = reg.ok === true;
-
-// ② 拒绝登记「与原件相同」的文件
-const dup = await (await fetch(`${BASE}/api/versions?p=` + encodeURIComponent("茶事方案.md"), {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ action: "register", file: "茶事方案.md" }),
-})).json();
-result.dupRejected = !!dup.error;
-
-// ③ 前端：打开文档 → 切「版本对照」Tab → 列表 + diff 渲染
-await send("Page.navigate", { url: `${BASE}/?doc=` + encodeURIComponent("茶事方案.md") });
+await send("Page.navigate", { url: `${BASE}/?doc=${encodeURIComponent("验收错位测试.md")}` });
 await sleep(2400);
-await evalv(`(() => { const tab = document.querySelector('[data-feedback="versions"]'); if (tab) tab.click(); return !!tab; })()`);
-await sleep(900);
-result.ui = await evalv(`(() => {
-  const panel = document.querySelector("#cards .version-panel");
-  const items = [...document.querySelectorAll("#cards .vp-item")];
-  return {
-    panelShown: !!panel,
-    listCount: items.length,
-    firstFile: (items[0] && items[0].querySelector(".vp-file") || {}).textContent || "",
-    status: (items[0] && items[0].querySelector(".vp-status") || {}).textContent || "",
-  };
-})()`);
-// diff 已自动加载
-result.diff = await evalv(`(() => {
-  const rows = [...document.querySelectorAll("#cards .vp-row")];
-  return { rowCount: rows.length, addedShown: rows.some((r) => r.classList.contains("added")), removedShown: rows.some((r) => r.classList.contains("removed")) };
+await evalv(openVersionsTab);
+await sleep(1200);
+result.panelShown = await evalv(`!!document.querySelector("#cards .version-panel .vp-list")`);
+result.unchangedWording = await evalv(`(() => {
+  const s = document.querySelector("#cards .vp-summary");
+  return s ? (s.textContent.includes("未变化") && !s.textContent.includes("保留 ")) : false;
+})()`) && await evalv(`(() => {
+  const d = document.querySelector("#cards .vp-unchanged");
+  if (!d) return false;
+  d.open = true;
+  return d.querySelectorAll(".vp-row.same").length > 0;
 })()`);
 
-// ④ 验收
-await evalv(`(() => { document.getElementById("vp-accept").click(); return 1; })()`);
-let accepted = null;
-for (let i = 0; i < 12; i += 1) {
-  accepted = await evalv(`(() => {
-    const st = document.querySelector("#cards .vp-status");
-    return st ? st.dataset.status : null;
-  })()`);
-  if (accepted === "accepted") break;
-  await sleep(400);
-}
-result.accepted = accepted;
+// B1. 漂移黄条：登记后文件被改 → 对照顶部必须明示「与登记时不一致」（读改写 = 重跑也真漂移）
+await writeFile(join(VAULT, "验收错位测试-v2.md"), (await readFile(join(VAULT, "验收错位测试-v2.md"), "utf8")) + "\n登记之后偷偷加的一段。\n");
+await evalv(`(() => { const b = document.querySelector("#cards .vp-item"); if (b) b.click(); return 1; })()`);
+await sleep(1100);
+result.driftWarned = await evalv(`!!document.querySelector("#cards .vp-changed")`);
 
-// ⑤ 继续批注新版本 + 验证「保留」标记继承
-await evalv(`(() => { document.getElementById("vp-open").click(); return 1; })()`);
-let carried = 0;
-for (let i = 0; i < 15; i += 1) {
-  carried = await evalv(`(() => {
-    const list = document.querySelectorAll('#doc .anchor[data-kind="highlight"]').length;
-    return list;
-  })()`) || 0;
+// B2. 验收落在本尊：重新登记（内容变后的 idB）→ 再登记 v4 干扰（UI 未刷新）→ 点验收
+//     → 被验收的必须是 UI 选中的 idB，v4 必须仍是 pending
+const uiReReg = await post(`/api/versions?p=${encodeURIComponent("验收错位测试.md")}`, { action: "register", file: "验收错位测试-v2.md", note: "内容更新后重新登记" });
+const uiIdB = uiReReg.json.version && uiReReg.json.version.id;
+await post(`/api/versions?p=${encodeURIComponent("验收错位测试.md")}`, { action: "register", file: "验收错位测试-v4.md", note: "干扰项：登记时 UI 未刷新" });
+const acceptedBefore = (await getVersions("验收错位测试.md")).filter(v => v.status === "accepted").length;
+await evalv(openVersionsTab);
+await sleep(1200);
+// 显式点选 idB（内容变化后重新登记的那条）：用户的「所见」就是这条
+const picked = await evalv(`(() => {
+  const b = document.querySelector('#cards .vp-item[data-vp-id="${uiIdB}"]');
+  if (!b) return false;
+  b.click();
+  return true;
+})()`);
+await sleep(1000);
+const uiActiveId = await evalv(`(() => { const a = document.querySelector("#cards .vp-item.active"); return a ? a.dataset.vpId : ""; })()`);
+await evalv(`(() => { const b = document.querySelector("#cards .vp-accept"); if (b) b.click(); return 1; })()`);
+await sleep(1300);
+const uiList = await getVersions("验收错位测试.md");
+result.uiAcceptedRightVersion = picked && uiActiveId === uiIdB
+  && uiList.find(v => v.id === uiIdB).status === "accepted"
+  && uiList.find(v => v.file === "验收错位测试-v4.md").status === "pending"
+  && uiList.filter(v => v.status === "accepted").length === acceptedBefore + 1;
+
+// B3. 真实跳转：继续批注新版本 → URL 真的变了，保留标记已继承在（服务端幂等路径）
+await evalv(`(() => { const b = document.querySelector("#cards .vp-open"); if (b) b.click(); return 1; })()`);
+let openedNewVersion = false, carriedRetained = 0;
+for (let i = 0; i < 20; i += 1) {
   const loc = await evalv(`decodeURIComponent(location.search.replace("?doc=", ""))`);
-  if (loc.includes("茶事方案-v2") && carried > 0) break;
+  carriedRetained = await evalv(`document.querySelectorAll('#doc .anchor[data-kind="highlight"]').length`) || 0;
+  if (loc.includes("验收错位测试-v2") && carriedRetained > 0) { openedNewVersion = true; break; }
   await sleep(500);
 }
-result.openedNewVersion = true;
-result.carriedRetained = carried;
-// ⑥ 恢复现场：新版本文件的批注清掉（保持幂等）
+result.openedNewVersion = openedNewVersion;
+result.carriedRetained = carriedRetained;
+
+// 清理：-v2 上继承来的批注删掉（保持套件幂等；登记与验收状态是真实历史，保留）
 await evalv(`(async () => {
-  const list = (await (await fetch('/api/annotations?p=' + encodeURIComponent('茶事方案-v2.md'))).json()).annotations || [];
+  const list = (await (await fetch('/api/annotations?p=' + encodeURIComponent('验收错位测试-v2.md'))).json()).annotations || [];
   for (const a of list) {
     if (a.kind === 'highlight') {
-      await fetch('/api/annotations?p=' + encodeURIComponent('茶事方案-v2.md'), {
+      await fetch('/api/annotations?p=' + encodeURIComponent('验收错位测试-v2.md'), {
         method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
       });
     }

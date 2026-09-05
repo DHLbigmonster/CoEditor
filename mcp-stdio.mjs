@@ -6,7 +6,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 import { acquireStoreLock, readStore, writeStore } from './lib/store.mjs';
 import { reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
-import { registerVersion } from './lib/version.mjs';
+import { registerVersion, prepareVersionRegistration } from './lib/version.mjs';
 const ROOT = resolve(process.argv[2] || process.cwd());
 const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
@@ -292,11 +292,23 @@ async function callTool(name, args = {}) {
     case "register_version": {
       const data = await loadSidecar();
       if (!args.doc || !args.file) return { error: "doc and file required" };
-      if (String(args.file) === String(args.doc)) return { error: "version file must differ from the original" };
-      // 新版本文件必须真实存在：登记一个不存在的文件会让人验收时扑空
-      const versionPath = join(ROOT, args.file);
-      if (!await stat(versionPath).catch(() => null)) return { error: `version file not found: ${args.file}` };
-      const entry = registerVersion(data, { doc: args.doc, file: args.file, note: args.note });
+      // 与 HTTP 同一条路径：realpath 规范化（./x 与 x 是同一文件）、内容哈希、原样快照
+      const docAbs = safeResolve(args.doc);
+      const fileAbs = safeResolve(args.file);
+      if (!docAbs || !fileAbs) return { error: "invalid path" };
+      const prep = await prepareVersionRegistration({
+        docPath: docAbs, filePath: fileAbs,
+        snapshotsDir: join(ROOT, ".marginalia", "version-snapshots"),
+      });
+      if (prep.error) return { error: prep.error };
+      const entry = registerVersion(data, {
+        doc: args.doc, file: args.file, note: args.note,
+        id: prep.id, sourceHash: prep.sourceHash, nextHash: prep.nextHash,
+        snapshot: {
+          source: relative(ROOT, prep.snapshot.source),
+          next: relative(ROOT, prep.snapshot.next),
+        },
+      });
       await saveSidecar(data);
       return { ok: true, version: entry };
     }

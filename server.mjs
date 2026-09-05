@@ -1,26 +1,45 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { readFile, writeFile, mkdir, stat, readdir, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, readdir, rename, realpath } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 
 import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
-import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
-import { listVersions, registerVersion, setVersionStatus, textDiff } from './lib/version.mjs';
+import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf } from './lib/review.mjs';
+import { listVersions, registerVersion, setVersionStatus, textDiff, versionIdOf, prepareVersionRegistration, carryRetainedAnnotations } from './lib/version.mjs';
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 let requestQueue = Promise.resolve();
-async function queueRequest() {
+const QUEUE_WAIT_TIMEOUT_MS = 15000;
+async function queueRequest(timeoutMs = QUEUE_WAIT_TIMEOUT_MS) {
  const previous = requestQueue; let release;
  requestQueue = new Promise(resolve => { release = resolve; });
- await previous; return release;
+ let timer = null;
+ try {
+   // 排队也要有上限：一个卡死的请求不得让后续 API 全部饿死（表现就是「页面能开、API 不响应」）
+   await Promise.race([previous, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('api-queue-timeout')), timeoutMs); })]);
+   return release;
+ } catch (error) {
+   release(); // 超时退出也要放行后队，否则整条链永久断流
+   throw error;
+ } finally { clearTimeout(timer); }
 }
-async function readJson(req) {
- let raw = ''; for await (const chunk of req) {
-  raw += chunk; if (raw.length > 32 * 1024 * 1024) throw new Error('request-too-large');
- } return raw ? JSON.parse(raw) : {};
+const BODY_TIMEOUT_MS = 20000;
+function readJson(req, timeoutMs = BODY_TIMEOUT_MS) {
+ return new Promise((resolveJson, rejectJson) => {
+   let raw = ''; let done = false;
+   const finish = (fn, value) => { if (done) return; done = true; clearTimeout(timer); fn(value); };
+   const timer = setTimeout(() => { finish(rejectJson, new Error('request-body-timeout')); req.destroy(); }, timeoutMs);
+   req.on('data', (chunk) => {
+     raw += chunk;
+     if (raw.length > 32 * 1024 * 1024) { finish(rejectJson, new Error('request-too-large')); req.destroy(); }
+   });
+   req.on('end', () => { if (done) return; try { finish(resolveJson, raw ? JSON.parse(raw) : {}); } catch (error) { finish(rejectJson, error); } });
+   req.on('error', (error) => finish(rejectJson, error));
+ });
 }
 const execFileAsync = promisify(execFile);
 
@@ -84,42 +103,7 @@ async function noteRecent(dir) {
 const readSidecar = () => readStore(SIDECAR);
 const writeSidecar = (data, opts) => writeStore(SIDECAR, data, opts);
 
-/* 批注显示号：no = "批次-序号"（0-1、0-2……第 0 批次第 1 条），用户可读、Agent 引用同号。
-   读时懒迁移：存量无 no 的批注按 round 分组、组内存储顺序编号，写回固化（删除不影响已有编号）。 */
-function ensureAnnotationNos(data) {
-  let changed = false;
-  for (const list of Object.values(data.docs || {})) {
-    const usedByRound = new Map();
-    for (const item of list) {
-      const round = Number.isFinite(item.round) ? item.round : 0;
-      if (!usedByRound.has(round)) usedByRound.set(round, new Set());
-      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
-      if (match && Number(match[1]) === round && Number(match[2]) > 0) usedByRound.get(round).add(Number(match[2]));
-    }
-    for (const item of list) {
-      const round = Number.isFinite(item.round) ? item.round : 0;
-      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
-      if (!match || Number(match[1]) !== round || Number(match[2]) <= 0) {
-        const used = usedByRound.get(round);
-        let seq = 1;
-        while (used.has(seq)) seq += 1;
-        used.add(seq);
-        item.no = `${round}-${seq}`;
-        changed = true;
-      }
-    }
-  }
-  return changed;
-}
-
-function allocateNo(list, round) {
-  ensureAnnotationNos({ docs: { current: list } });
-  const max = list.reduce((value, item) => {
-    const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
-    return match && Number(match[1]) === round ? Math.max(value, Number(match[2])) : value;
-  }, 0);
-  return `${round}-${max + 1}`;
-}
+/* 批注显示号、锚点偏移等公共逻辑在 lib/review.mjs（HTTP 与 MCP 共用一份实现） */
 
 function nextSeq(list, prefix) {
   const max = list.reduce((acc, item) => {
@@ -130,17 +114,6 @@ function nextSeq(list, prefix) {
 }
 
 /* ---------- 锚点偏移与矛盾检测 ---------- */
-function offsetsOf(text, quote, prefix) {
-  if (!quote) return null;
-  let at = text.indexOf(quote);
-  if (at < 0 && prefix) {
-    const p = text.indexOf(prefix);
-    if (p >= 0) at = p + prefix.length;
-  }
-  if (at < 0 && quote.length > 12) at = text.indexOf(quote.slice(0, 12));
-  return at < 0 ? null : { start: at, end: at + quote.length };
-}
-
 function overlapRatio(a, b) {
   if (!a || !b) return 0;
   const lo = Math.max(a.start, b.start);
@@ -210,7 +183,7 @@ let UISTATE = join(ROOT, ".marginalia", "ui-state.json");
 let uiState = { path: null, selected: null, updated: null };
 try { uiState = JSON.parse(readFileSync(UISTATE, "utf8")); } catch { /* 首次无文件 */ }
 
-const server = http.createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const send = (code, body, type = "application/json; charset=utf-8") => {
     res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
@@ -227,7 +200,8 @@ const server = http.createServer(async (req, res) => {
     // The picker can remain open for minutes; it must not block state transactions.
     if (url.pathname.startsWith('/api/') && url.pathname !== '/api/folder-picker') {
       releaseQueue = await queueRequest();
-      if (/^\/api\/(annotations|constraints|rounds|canvas|supersede|sync|review|resolve)(?:\/|$)/.test(url.pathname)) releaseStore = await acquireStoreLock(SIDECAR);
+      // versions 的登记/验收/继承都改 sidecar，必须与批注写入同一把锁（否则可与 MCP 并发互踩）
+      if (/^\/api\/(annotations|constraints|rounds|canvas|supersede|sync|review|resolve|versions)(?:\/|$)/.test(url.pathname)) releaseStore = await acquireStoreLock(SIDECAR);
     }
     if (url.pathname === '/api/sync') {
       const data = await readSidecar(); const target = safeResolve(url.searchParams.get('p'));
@@ -249,18 +223,58 @@ const server = http.createServer(async (req, res) => {
       const data = await readSidecar();
       try {
         if (body.action === 'register') {
-          // 新版本文件必须真实存在，且与原件不同（原件永不被覆盖）
-          const target = safeResolve(body.file);
-          if (!target) return send(400, JSON.stringify({ error: 'invalid path' }));
-          await stat(target).catch(() => { throw new Error('version file not found'); });
-          const entry = registerVersion(data, { doc, file: body.file, note: body.note });
+          const docAbs = safeResolve(doc);
+          const fileAbs = safeResolve(body.file);
+          if (!docAbs || !fileAbs) return send(400, JSON.stringify({ error: 'invalid path' }));
+          // realpath 规范化 + 内容哈希 + 原样快照：`./x.md` 与 `x.md` 是同一文件；
+          // 验收核对的是哈希而不是路径字符串，文件被调包过就骗不过验收
+          const prep = await prepareVersionRegistration({
+            docPath: docAbs, filePath: fileAbs,
+            snapshotsDir: join(ROOT, '.marginalia', 'version-snapshots'),
+          });
+          if (prep.error) return send(400, JSON.stringify({ error: prep.error }));
+          const entry = registerVersion(data, {
+            doc, file: body.file, note: body.note,
+            id: prep.id, sourceHash: prep.sourceHash, nextHash: prep.nextHash,
+            snapshot: {
+              source: relative(ROOT, prep.snapshot.source),
+              next: relative(ROOT, prep.snapshot.next),
+            },
+          });
           await writeSidecar(data);
           return send(200, JSON.stringify({ ok: true, version: entry }));
         }
         if (body.action === 'decide') {
-          const entry = setVersionStatus(data, doc, Number(body.index), body.status === 'rejected' ? 'rejected' : 'accepted');
-          await writeSidecar(data);
-          return send(200, JSON.stringify({ ok: true, version: entry }));
+          const id = String(body.id || '');
+          if (!id) return send(400, JSON.stringify({ error: 'version id required（列表序号会移位，不得用于验收）' }));
+          const target = listVersions(data, doc).find(item => item.id === id);
+          if (!target) return send(404, JSON.stringify({ error: 'version not found' }));
+          // 验收前核对当前文件内容：与登记时不一致 = 「已验收」是谎言，明确拒绝
+          const realFile = safeResolve(target.file);
+          const real = realFile ? await realpath(realFile).catch(() => null) : null;
+          if (!real) return send(400, JSON.stringify({ error: 'version file missing' }));
+          const currentHash = createHash('sha256').update(await readFile(real)).digest('hex');
+          try {
+            const entry = setVersionStatus(data, doc, id, body.status === 'rejected' ? 'rejected' : 'accepted', { expectHash: currentHash });
+            await writeSidecar(data);
+            return send(200, JSON.stringify({ ok: true, version: entry }));
+          } catch (error) {
+            if (error.code === 'version-content-changed') {
+              return send(409, JSON.stringify({ error: 'version-content-changed', detail: '文件内容与登记时不一致，验收已阻止。请重新对照后再决定。' }));
+            }
+            throw error;
+          }
+        }
+        if (body.action === 'carry') {
+          // 保留要求继承：服务端事务内完成，按来源批注 id 幂等，原文缺失明确上报
+          const toDoc = String(body.to || '');
+          const toAbs = safeResolve(toDoc);
+          if (!toAbs) return send(400, JSON.stringify({ error: 'invalid path' }));
+          const toText = await readFile(toAbs, 'utf8').catch(() => null);
+          if (toText === null) return send(400, JSON.stringify({ error: 'version file not readable' }));
+          const result = carryRetainedAnnotations(data, { fromDoc: doc, toDoc, toText });
+          if (result.carried.length || result.missing.length) await writeSidecar(data);
+          return send(200, JSON.stringify({ ok: true, ...result }));
         }
         return send(400, JSON.stringify({ error: 'unsupported action' }));
       } catch (error) {
@@ -268,18 +282,30 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // 版本对照：原文 vs 新版本（段落级），回答「这一轮改了哪里」
+    // 版本对照：原文 vs 新版本（段落级、保留顺序），回答「这一轮改了哪里」
     if (url.pathname === '/api/versions/diff') {
       const doc = url.searchParams.get('p');
       const file = url.searchParams.get('file');
+      const versionId = url.searchParams.get('id') || '';
       if (!doc || !file) return send(400, JSON.stringify({ error: 'doc and file required' }));
       const originalPath = safeResolve(doc);
       const versionPath = safeResolve(file);
       if (!originalPath || !versionPath) return send(400, JSON.stringify({ error: 'invalid path' }));
       try {
+        const extension = extname(versionPath).toLowerCase();
+        // 二进制成品（PDF/DOCX 等）不能按 UTF-8 当源文本硬对照——诚实说不可对照
+        if (BINARY_EXT.has(extension) || IMAGE_EXT.has(extension)) {
+          return send(200, JSON.stringify({ doc, file, binary: true, diff: null }));
+        }
         const original = await readFile(originalPath, 'utf8');
         const next = await readFile(versionPath, 'utf8');
-        return send(200, JSON.stringify({ doc, file, diff: textDiff(original, next) }));
+        let changed = null;
+        if (versionId) {
+          const data = await readSidecar();
+          const entry = listVersions(data, doc).find(item => item.id === versionId);
+          if (entry && entry.nextHash) changed = createHash('sha256').update(next).digest('hex') !== entry.nextHash;
+        }
+        return send(200, JSON.stringify({ doc, file, changed, diff: textDiff(original, next) }));
       } catch (error) {
         return send(400, JSON.stringify({ error: String(error && error.message || error) }));
       }
@@ -798,10 +824,29 @@ const server = http.createServer(async (req, res) => {
       return send(404, "not found", "text/plain");
     }
   } catch (error) {
+    if (error.message === 'api-queue-timeout' || error.message === 'request-body-timeout' || /store-busy/.test(error.message)) {
+      return send(503, JSON.stringify({ error: error.message }));
+    }
     send(500, JSON.stringify({ error: String(error && error.message ? error.message : error) }));
   } finally {
-    try { if (releaseStore) await releaseStore(); } finally { if (releaseQueue) releaseQueue(); }
+    try { if (releaseStore) await releaseStore(); } catch { /* 释放失败不外抛：锁最迟随心跳过期被回收，绝不能让 handler 崩进程 */ }
+    finally { if (releaseQueue) releaseQueue(); }
   }
+};
+
+// async handler 的任何异常都不允许变成 unhandledRejection 打死整个进程（Node 22 默认 crash）
+const server = http.createServer((req, res) => {
+  requestHandler(req, res).catch((error) => {
+    console.error(`[coeditor] ${req.method} ${req.url} failed:`, error && error.message ? error.message : error);
+    try {
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        res.end(JSON.stringify({ error: String(error && error.message ? error.message : error) }));
+      } else {
+        res.end();
+      }
+    } catch { /* socket 已死，无处可报 */ }
+  });
 });
 server.requestTimeout = 30000;
 

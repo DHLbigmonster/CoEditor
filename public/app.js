@@ -28,9 +28,14 @@ function canLeaveEditor() { return !hasDraft() || window.confirm('当前文字�
 window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preventDefault(); event.returnValue = ''; } });
 function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
 let feedbackFilter = 'pending';
+/* 版本对照状态（feedbackTabs 与渲染共用；选中记 id 不记序号——序号会随新增版本移位） */
+let versionState = { list: [], activeId: null, diff: null, diffChanged: null, loading: false };
+
 function feedbackTabs() {
  const labels = { pending: '待处理', retained: '保留', history: '历史', versions: '版本对照' };
- return '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">' + Object.entries(labels).map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + state.annotations.filter(a => feedbackGroup(a) === key).length + '</b></button>').join('') + '</div>';
+ // 版本数与批注数是两回事：用批注数组计数会虚报，这里各数各的
+ const countOf = key => key === 'versions' ? versionState.list.length : state.annotations.filter(a => feedbackGroup(a) === key).length;
+ return '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">' + Object.entries(labels).map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + countOf(key) + '</b></button>').join('') + '</div>';
 }
 document.addEventListener('click', event => { const button = event.target.closest('[data-feedback]'); if (!button) return; feedbackFilter = button.dataset.feedback; renderCards(); renderDrawer(); drawLines(); });
 function isCanvasMode() { return state.workspaceMode === "canvas"; }
@@ -586,19 +591,21 @@ function renderCards() {
 }
 
 /* 版本对照：Agent 改完登记的新版本在这里验收 —— 回答「这一轮改了哪里」 */
-let versionState = { list: [], active: 0, diff: null, loading: false };
 
 async function renderVersions(host) {
   if (!state.path) { host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">先打开一个文档。</p>'); return; }
-  const shell = document.createElement('div');
-  shell.className = 'version-panel';
+  let shell = host.querySelector('.version-panel');
+  if (!shell) { shell = document.createElement('div'); shell.className = 'version-panel'; host.appendChild(shell); }
   shell.innerHTML = '<div class="vp-loading">载入版本…</div>';
-  host.appendChild(shell);
   try {
     const res = await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`);
     const data = await res.json();
     versionState.list = data.versions || [];
   } catch { versionState.list = []; }
+  // 选中状态记 id 不记序号：列表会随新增版本移位，按序号验收就是「验收错对象」的根源
+  if (!versionState.activeId || !versionState.list.some(item => item.id === versionState.activeId)) {
+    versionState.activeId = versionState.list.length ? versionState.list[0].id : null;
+  }
   paintVersions(shell);
 }
 
@@ -608,90 +615,97 @@ function paintVersions(shell) {
     shell.innerHTML = '<p class="feedback-empty">还没有新版本。Agent 改完文档会登记在这里，原件始终保留。</p>';
     return;
   }
-  const active = list[Math.min(versionState.active, list.length - 1)];
+  const active = list.find(item => item.id === versionState.activeId) || list[0];
+  versionState.activeId = active.id;
   const statusText = { pending: '待验收', accepted: '已验收', rejected: '已退回' };
   shell.innerHTML = `
     <div class="vp-list" role="list">
-      ${list.map((item, i) => `<button role="listitem" class="vp-item${i === versionState.active ? ' active' : ''}" data-vp="${i}">
+      ${list.map(item => `<button role="listitem" class="vp-item${item.id === active.id ? ' active' : ''}" data-vp-id="${escapeHtml(item.id)}">
         <span class="vp-round">第 ${item.round} 轮</span>
         <span class="vp-file">${escapeHtml(item.file)}</span>
         <span class="vp-status" data-status="${item.status}">${statusText[item.status] || item.status}</span>
       </button>`).join('')}
     </div>
     <div class="vp-diff">${versionState.loading ? '对照中…' : diffHtml(versionState.diff, active)}</div>
+    ${versionState.diffChanged ? '<div class="vp-changed">⚠ 文件内容与登记时不一致：对照反映的是当前文件，验收会被拒绝。</div>' : ''}
     <div class="vp-actions">
-      <button id="vp-open" class="primary">继续批注新版本 →</button>
-      <button id="vp-accept">验收</button>
-      <button id="vp-reject" class="danger">退回</button>
+      <button class="vp-open primary">继续批注新版本 →</button>
+      <button class="vp-accept">验收</button>
+      <button class="vp-reject danger">退回</button>
     </div>`;
-  shell.querySelectorAll('[data-vp]').forEach((button) => button.addEventListener('click', async () => {
-    versionState.active = Number(button.dataset.vp);
+  shell.querySelectorAll('[data-vp-id]').forEach((button) => button.addEventListener('click', async () => {
+    versionState.activeId = button.dataset.vpId;
     versionState.diff = null;
+    versionState.diffChanged = null;
     paintVersions(shell);
     await loadDiff(shell);
   }));
-  shell.querySelector('#vp-open').addEventListener('click', async () => {
-    // 「保留的内容持续有效」：继续批注新版本时，把上一版生效中的「保留」标记带过去
-    // （仅当新版本还没有任何批注时执行一次，避免重复堆叠；锚定由新文本的模糊重定位自动完成）
+  shell.querySelector('.vp-open').addEventListener('click', async () => {
+    // 「保留的内容持续有效」：继承在服务端事务内完成（按来源批注 id 幂等、逐条核对原文）。
+    // 结果如实呈现——继承几条、缺几条、哪些原文找不到，绝不静默成功
+    const target = active;
     try {
-      const oldList = await (await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`)).json();
-      const retained = (oldList.annotations || []).filter(a => a.kind === 'highlight' && a.status === 'active');
-      const newList = await (await fetch(`/api/annotations?p=${encodeURIComponent(active.file)}`)).json();
-      const fresh = (newList.annotations || []).filter(a => a.status === 'active').length === 0;
-      if (retained.length && fresh) {
-        for (const item of retained) {
-          await fetch(`/api/annotations?p=${encodeURIComponent(active.file)}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              kind: 'highlight', quote: item.quote, prefix: item.prefix || '', suffix: item.suffix || '',
-              body: item.body || '（承自上一版的保留标记）', x: item.x, y: item.y,
-            }),
-          });
-        }
-        toast(`已把上一版的 ${retained.length} 个「保留」标记带到新版本`);
-      }
-    } catch { /* 继承失败不阻塞跳转 */ }
-    openDoc(active.file);
+      const res = await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'carry', to: target.file }),
+      });
+      const data = await res.json();
+      if (!res.ok) toast(`保留继承失败（${data.error || res.status}）——已打开新版本，请人工核对保留要求`);
+      else if (data.missing && data.missing.length) toast(`继承 ${data.carried.length} 条保留；⚠ ${data.missing.length} 条原文在新版找不到，已标记待确认`);
+      else if (data.carried && data.carried.length) toast(`已把 ${data.carried.length} 条「保留」要求带到新版本`);
+      else if (data.skipped && data.skipped.length) toast(`保留要求此前已继承（${data.skipped.length} 条）`);
+      else toast('上一版没有生效中的保留要求');
+    } catch { toast('保留继承请求失败——已打开新版本，请人工核对保留要求'); }
+    openDoc(target.file);
   });
-  shell.querySelector('#vp-accept').addEventListener('click', () => decideVersion(shell, 'accepted'));
-  shell.querySelector('#vp-reject').addEventListener('click', () => decideVersion(shell, 'rejected'));
+  shell.querySelector('.vp-accept').addEventListener('click', () => decideVersion(shell, 'accepted'));
+  shell.querySelector('.vp-reject').addEventListener('click', () => decideVersion(shell, 'rejected'));
   if (versionState.diff === null && !versionState.loading) loadDiff(shell);
 }
 
 function diffHtml(diff, active) {
   if (!diff) return `<p class="vp-hint">${escapeHtml(active && active.note ? active.note : '这一轮改了哪里：展开对照查看。')}</p>`;
+  if (diff.binary) return '<p class="vp-hint">二进制成品（PDF/DOCX 等）无法逐段对照——请打开新文件人工查看。</p>';
   const { rows, removed, summary } = diff;
-  const show = rows.slice(0, 60);
+  // 变化全量展示（不截断）；「未变化」折叠可展开，与用户主动设置的「保留要求」用词区分开
   return `
-    <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 保留 ${summary.same} 段</div>
+    <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>
     <div class="vp-rows">
-      ${removed.slice(0, 20).map(line => `<div class="vp-row removed"><s>${escapeHtml(line)}</s></div>`).join('')}
-      ${show.map(row => `<div class="vp-row ${row.type}">${row.type === 'added' ? '<b>+</b> ' : ''}${escapeHtml(row.text)}</div>`).join('')}
-    </div>`;
+      ${removed.map(line => `<div class="vp-row removed"><s>${escapeHtml(line)}</s></div>`).join('')}
+      ${rows.filter(row => row.type === 'added').map(row => `<div class="vp-row added"><b>+</b> ${escapeHtml(row.text)}</div>`).join('')}
+    </div>
+    ${rows.some(row => row.type === 'same') ? `<details class="vp-unchanged"><summary>未变化的 ${summary.unchanged} 段（点开查看）</summary>${rows.filter(row => row.type === 'same').map(row => `<div class="vp-row same">${escapeHtml(row.text)}</div>`).join('')}</details>` : ''}`;
 }
 
 async function loadDiff(shell) {
-  const active = versionState.list[versionState.active];
+  const active = versionState.list.find(item => item.id === versionState.activeId);
   if (!active) return;
   versionState.loading = true;
   try {
-    const res = await fetch(`/api/versions/diff?p=${encodeURIComponent(state.path)}&file=${encodeURIComponent(active.file)}`);
+    const res = await fetch(`/api/versions/diff?p=${encodeURIComponent(state.path)}&file=${encodeURIComponent(active.file)}&id=${encodeURIComponent(active.id)}`);
     const data = await res.json();
     versionState.diff = data.diff || null;
-  } catch { versionState.diff = null; }
+    versionState.diffChanged = data.changed === true;
+  } catch { versionState.diff = null; versionState.diffChanged = null; }
   versionState.loading = false;
   paintVersions(shell);
 }
 
 async function decideVersion(shell, status) {
-  await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`, {
+  const active = versionState.list.find(item => item.id === versionState.activeId);
+  if (!active) return;
+  const res = await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'decide', index: versionState.active, status }),
+    body: JSON.stringify({ action: 'decide', id: active.id, status }),
   });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    toast(detail.error === 'version-content-changed' ? '文件内容与登记时不一致，验收已阻止——请重新对照' : `操作失败：${detail.error || res.status}`);
+  } else {
+    toast(status === 'accepted' ? '已验收 · 可继续在新版本上批注' : '已退回 · 让 Agent 再改一版');
+  }
   await renderVersions(shell);
-  toast(status === 'accepted' ? '已验收 · 可继续在新版本上批注' : '已退回 · 让 Agent 再改一版');
 }
 
 /* 卡片内联编辑批注文字 */
@@ -1827,6 +1841,15 @@ async function loadAnnotations() {
   }
   renderCards();
   applyTransform();
+  // 版本数轻量预取：让「版本对照」Tab 一开始就显示真实数量，而不是打开过后才正确
+  fetch(`/api/versions?p=${encodeURIComponent(state.path)}`)
+    .then(r => r.json())
+    .then(d => {
+      versionState.list = d.versions || [];
+      const tab = document.querySelector('[data-feedback="versions"] b');
+      if (tab) tab.textContent = versionState.list.length;
+    })
+    .catch(() => {});
   drawArrows();
   renderNotes();
   renderImages();
@@ -2709,6 +2732,7 @@ function renderDrawer() {
       <div class="d-item-head">
         <span class="c-id">${item.no || item.id}</span>
         ${item.kind === "highlight" ? '<span class="c-kind hl">保留</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
+        ${item.anchorStatus === "missing" ? '<span class="c-badge" style="color:#8a6116">缺失待确认</span>' : ""}
         ${item.status === "active" ? '<i class="live-dot" title="当前使用"></i>' : `<span class="c-badge">${LABELS[item.status] || item.status}</span>`}
         <span class="c-weight">${weightDots(item.weight)}</span>
       </div>
@@ -2720,6 +2744,12 @@ function renderDrawer() {
       </div>
     </div>`;
   let html = feedbackTabs();
+  // 窄屏抽屉与宽屏侧栏是同一个功能的两个入口：版本面板直接复用同一组件，不另养一套
+  if (feedbackFilter === 'versions') {
+    $("drawer-body").innerHTML = html + '<div class="version-panel drawer-versions"></div>';
+    renderVersions($("drawer-body").querySelector('.drawer-versions'));
+    return;
+  }
   for (const [r, items] of groups) {
     html += `<div class="d-round">${r === round ? `第 ${r} 批次 · 进行中` : `第 ${r} 批次 · 历史`}</div>`;
     html += items.map(itemHtml).join("");
