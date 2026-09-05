@@ -1286,3 +1286,37 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
   border-radius: 6px;
 }
 .sb-gap:hover { background: rgba(0, 0, 0, .04); color: var(--ink-dim); }
+
+/* ---------- v1.2 · 大纲面板 / 顶栏保存徽标 / 排版并排 ---------- */
+#save-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--ink-dim); padding: 4px 8px; border-radius: 8px;
+  user-select: none; white-space: nowrap;
+}
+#save-badge i { font-style: normal; font-size: 11px; color: var(--addressed); }
+#save-badge[data-state="saving"] i { color: var(--stale); }
+#save-badge[data-state="error"] { color: #d64545; background: rgba(214, 69, 69, .08); }
+#save-badge[data-state="error"] i { color: #d64545; }
+
+.rail-tabs { display: flex; gap: 2px; background: rgba(0, 0, 0, .05); border-radius: 9px; padding: 2px; margin: 2px 0 12px; }
+.rail-tabs button {
+  flex: 1; border: 0; background: transparent; border-radius: 7px; padding: 5px 0;
+  font-size: 12px; cursor: pointer; color: var(--ink-dim);
+}
+.rail-tabs button[aria-selected="true"] { background: var(--panel-2); color: var(--ink); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.outline-list { display: flex; flex-direction: column; gap: 2px; }
+.outline-item {
+  display: flex; align-items: center; gap: 8px; text-align: left;
+  border: 0; background: transparent; border-radius: 8px; padding: 6px 10px;
+  font-size: 12.5px; color: var(--ink-dim); cursor: pointer; line-height: 1.5;
+}
+.outline-item span { font: 500 10px/1 "SF Mono", Menlo, monospace; color: var(--ink-faint); flex: none; }
+.outline-item.lv2 { padding-left: 22px; }
+.outline-item.lv3 { padding-left: 34px; font-size: 12px; }
+.outline-item:hover { background: rgba(0, 0, 0, .045); color: var(--ink); }
+.outline-item.active { background: rgba(16, 163, 127, .1); color: var(--ink); }
+.sb-render { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sb-render .sb-pane {
+  width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 9px; background: #fff;
+}
+.sb-render-note { font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; }

@@ -148,6 +148,9 @@ const evalv = async (expr) => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const openVersionsTab = `(() => {
+  // 右栏是双层视图：先回「反馈」，再进「版本对照」（大纲视图下反馈 tab 不渲染，是有意设计）
+  const railFeedback = document.querySelector('[data-rail-tab="feedback"]');
+  if (railFeedback) railFeedback.click();
   const pending = document.querySelector('[data-feedback="pending"]');
   if (pending) pending.click();
   const tab = document.querySelector('[data-feedback="versions"]');
@@ -165,17 +168,51 @@ result.reportShown = await evalv(`(() => {
   const r = document.querySelector("#cards .vp-report");
   return r ? r.textContent.includes("1 处保留内容未改动") : false;
 })()`);
-// 并排双栏（默认视图）：左右两列 + 未变化折叠可展开
+// 愿景图1/3：顶栏常驻保存徽标 + 右栏「大纲」面板（md 的 # 标题）
+result.saveBadge = await evalv(`(() => {
+  const b = document.getElementById("save-badge");
+  return !!b && b.textContent.includes("已保存到本地");
+})()`);
+result.outlineWorks = await evalv(`(async () => {
+  const tab = document.querySelector('[data-rail-tab="outline"]');
+  if (!tab) return false;
+  tab.click();
+  await new Promise(r => setTimeout(r, 300));
+  const items = [...document.querySelectorAll('#cards .outline-item')];
+  if (!items.length) return false;
+  items[0].click();
+  await new Promise(r => setTimeout(r, 400));
+  return items[0].classList.contains('active') && !!document.querySelector('#doc [data-outline-idx="0"]');
+})()`);
+await evalv(openVersionsTab);
+await sleep(1000);
+// 愿景图2：并排默认视图 = 渲染后的文档双栏（md 走 renderMarkdown，iframe 禁脚本）
+result.renderPanes = await evalv(`(async () => {
+  for (let i = 0; i < 10; i++) {
+    const frames = document.querySelectorAll('#cards .sb-render .sb-pane');
+    if (frames.length === 2 && frames[0].srcdoc && frames[1].srcdoc) {
+      return frames[0].srcdoc.includes('验收错位') && frames[1].srcdoc.includes('验收错位');
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return false;
+})()`);
+// 并排默认是排版视图；切「文本」验证逐段对照（折叠的未变化段可展开），再切回排版
 result.unchangedWording = await evalv(`(() => {
   const s = document.querySelector("#cards .vp-summary");
   return s ? (s.textContent.includes("未变化") && !s.textContent.includes("保留 ")) : false;
 })()`) && await evalv(`(async () => {
+  const toggle = document.querySelector('#cards [data-vp-side="text"]');
+  if (toggle) toggle.click();
+  await new Promise(r => setTimeout(r, 300));
   const gap = document.querySelector("#cards .sb-gap");
-  if (!gap) return !!document.querySelector("#cards .sb-row.same");
-  gap.click();
-  await new Promise(r => setTimeout(r, 200));
+  if (gap) {
+    gap.click();
+    await new Promise(r => setTimeout(r, 200));
+  }
   return document.querySelectorAll("#cards .sb-row.same").length > 0;
 })()`);
+await evalv(`(() => { const t = document.querySelector('#cards [data-vp-side="render"]'); if (t) t.click(); return 1; })()`);
 
 // B1. 漂移黄条：登记后文件被改 → 对照顶部必须明示「与登记时不一致」（读改写 = 重跑也真漂移）
 await writeFile(join(VAULT, P("验收错位测试-v2.md")), (await readFile(join(VAULT, P("验收错位测试-v2.md")), "utf8")) + "\n登记之后偷偷加的一段。\n");

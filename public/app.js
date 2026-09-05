@@ -10,8 +10,15 @@ const state = { path: null, text: "", mtime: 0, annotations: [], selected: null,
   vaultRoot: "", workspaceMode: "read" };
 
 function syncStatus(text, bad = false) {
- const el = $('sync-status'); if (!el) return;
- el.textContent = text; el.dataset.error = String(bad);
+ const el = $('sync-status'); if (el) { el.textContent = text; el.dataset.error = String(bad); }
+ // 顶栏常驻保存徽标：本地优先的产品承诺要一直可见，而不是藏在侧栏角落
+ const badge = $('save-badge');
+ if (badge) {
+   const busy = text === '正在保存…';
+   badge.dataset.state = bad ? 'error' : busy ? 'saving' : 'saved';
+   badge.querySelector('i').textContent = bad ? '×' : busy ? '•' : '✓';
+   badge.childNodes[badge.childNodes.length - 1].textContent = ' ' + text;
+ }
 }
 async function checkedFetch(url, options) {
  const writing = options && options.method && options.method !== 'GET';
@@ -27,9 +34,82 @@ function hasDraft() { return editSession && editSession.cm.getValue() !== editSe
 function canLeaveEditor() { return !hasDraft() || window.confirm('当前文字还没有保存。确定放弃这些修改吗？'); }
 window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preventDefault(); event.returnValue = ''; } });
 function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
+let railTab = 'feedback'; // 右栏两个视图：大纲（标题导航）/ 反馈（批注分类）
+
+/* 大纲：从渲染结果提取 h1-h3（md 在 #doc，HTML 在预览 iframe 里），点击滚到对应位置 */
+function extractOutline() {
+  const collect = (root) => {
+    if (!root) return [];
+    const items = [];
+    root.querySelectorAll("h1, h2, h3").forEach((el) => {
+      const text = (el.textContent || "").trim().slice(0, 60);
+      if (!text) return;
+      el.dataset.outlineIdx = String(items.length);
+      items.push({ level: Number(el.tagName[1]), text, idx: items.length });
+    });
+    return items;
+  };
+  let outline = [];
+  try {
+    const frame = $("html-frame");
+    if (frame && frame.contentDocument && frame.contentDocument.body) outline = collect(frame.contentDocument);
+  } catch { /* 跨文档不可达时忽略 */ }
+  if (!outline.length) { try { outline = collect($("doc")); } catch { /* 同上 */ } }
+  state.outline = outline;
+}
+
+function goToOutline(idx) {
+  let el = null; let inFrame = false;
+  try {
+    const frame = $("html-frame");
+    if (frame && frame.contentDocument) { el = frame.contentDocument.querySelector(`[data-outline-idx="${idx}"]`); inFrame = true; }
+  } catch { /* 忽略 */ }
+  if (!el) el = $("doc").querySelector(`[data-outline-idx="${idx}"]`);
+  if (!el) return;
+  document.querySelectorAll('.outline-item').forEach(node => node.classList.toggle('active', Number(node.dataset.outlineGo) === idx));
+  if (!inFrame) { el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+  const frame = $("html-frame");
+  const top = frame.getBoundingClientRect().top + window.scrollY + el.getBoundingClientRect().top - 84;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+}
 let feedbackFilter = 'pending';
 /* 版本对照状态（feedbackTabs 与渲染共用；选中记 id 不记序号——序号会随新增版本移位） */
-let versionState = { list: [], activeId: null, diff: null, diffChanged: null, loading: false, view: 'side', report: null };
+let versionState = { list: [], activeId: null, diff: null, diffChanged: null, loading: false, view: 'side', sideMode: 'render', report: null, rendered: null };
+
+/* 排版并排：md/txt 用与阅读模式同一套 renderMarkdown，HTML 用原始保真源码，
+   各自装进禁脚本的 iframe（sandbox=""）——展示排版，不执行内容。 */
+const RENDERABLE_TEXT = /\.(md|markdown|txt|html?|json|csv)$/i;
+const PAPER_CSS = `body{margin:0;padding:26px 28px;font:15px/1.9 -apple-system,BlinkMacSystemFont,"PingFang SC","Songti SC",serif;color:#0d0d0d;background:#fff;overflow-wrap:break-word}
+h1{font-size:23px;line-height:1.4}h2{font-size:18px;line-height:1.5}h3{font-size:15.5px}h1,h2,h3{margin:1.2em 0 .5em}
+p{margin:.6em 0}ul,ol{padding-left:1.4em}blockquote{margin:1em 0;padding:2px 14px;border-left:3px solid #e4e4e4;color:#5d5d5d}
+pre{background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto}code{font-family:"SF Mono",Menlo,monospace;font-size:12.5px}
+img{max-width:100%}hr{border:0;border-top:1px solid #e4e4e4}a{color:#0d0d0d}`;
+const wrapRendered = (inner, isRawHtml) => isRawHtml
+  ? inner
+  : `<!doctype html><html><head><meta charset="utf-8"><style>${PAPER_CSS}</style></head><body>${inner}</body></html>`;
+const renderSourceDoc = (text, path) => {
+  const isHtml = /\.html?$/i.test(path || "");
+  const isPlain = /\.(json|csv|txt)$/i.test(path || "");
+  const body = isHtml ? text.replace(/<script[\s\S]*?<\/script>/gi, "") : isPlain ? `<pre>${escapeHtml(text)}</pre>` : renderMarkdown(text);
+  return wrapRendered(body, isHtml);
+};
+
+async function ensureRenderedDiff(active) {
+  const key = active && active.id;
+  if (!key) return;
+  if (versionState.rendered && versionState.rendered.key === key) return;
+  versionState.rendered = { key, left: null, right: null };
+  try {
+    const [orig, next] = await Promise.all([
+      (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json(),
+      (await fetch(`/api/doc?p=${encodeURIComponent(active.file)}`)).json(),
+    ]);
+    versionState.rendered.left = renderSourceDoc(orig.text || "", state.path);
+    versionState.rendered.right = renderSourceDoc(next.text || "", active.file);
+  } catch { versionState.rendered = { key, left: null, right: null }; }
+  const shell = document.querySelector("#cards .version-panel, #drawer-body .version-panel");
+  if (shell) paintVersions(shell);
+}
 
 function feedbackTabs() {
  const labels = { pending: '待处理', retained: '保留', history: '历史', versions: '版本对照' };
@@ -580,15 +660,40 @@ function selectCard(id) {
 function renderCards() {
   const host = $("cards");
   host.innerHTML = "";
-  if (!isCanvasMode()) host.innerHTML = '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
+  const activeCount = state.annotations.filter((item) => item.status === "active").length;
+  $("stat-count").textContent = state.annotations.length;
+  $("stat-active").textContent = activeCount;
+  if (!isCanvasMode()) {
+    host.innerHTML = '<div class="rail-tabs" role="tablist" aria-label="大纲与反馈">'
+      + '<button role="tab" data-rail-tab="outline"' + (railTab === 'outline' ? ' aria-selected="true"' : '') + '>大纲</button>'
+      + '<button role="tab" data-rail-tab="feedback"' + (railTab === 'feedback' ? ' aria-selected="true"' : '') + '>反馈</button>'
+      + '</div>';
+    if (railTab === 'outline') { renderOutline(host); return; }
+    host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs());
+  }
   const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
   if (!isCanvasMode() && feedbackFilter === 'versions') { renderVersions(host); return; }
   for (const annotation of visible) host.appendChild(cardElement(annotation));
   if (!visible.length && !isCanvasMode()) host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">' + (feedbackFilter === 'pending' ? '没有待处理的反馈。选中文字，写下想改的地方。' : feedbackFilter === 'retained' ? '选中文字并点「保留」，留下后续修改不能动的内容。' : '处理过的反馈会留在这里，随时可以追溯。') + '</p>');
-  const active = state.annotations.filter((item) => item.status === "active").length;
-  $("stat-count").textContent = state.annotations.length;
-  $("stat-active").textContent = active;
 }
+
+function renderOutline(host) {
+  const list = document.createElement('div');
+  list.className = 'outline-list';
+  if (!state.outline || !state.outline.length) {
+    list.innerHTML = '<p class="feedback-empty">此文档没有标题结构。Markdown 的 # 标题、HTML 的 h1-h3 会出现在这里，点一下跳到对应位置。</p>';
+  } else {
+    list.innerHTML = state.outline.map(item => `<button class="outline-item lv${item.level}" data-outline-go="${item.idx}" title="${escapeHtml(item.text)}"><span>${String(item.idx + 1).padStart(2, '0')}</span>${escapeHtml(item.text)}</button>`).join('');
+  }
+  host.appendChild(list);
+}
+
+document.addEventListener('click', event => {
+  const tab = event.target.closest('[data-rail-tab]');
+  if (tab) { railTab = tab.dataset.railTab; renderCards(); return; }
+  const go = event.target.closest('[data-outline-go]');
+  if (go) goToOutline(Number(go.dataset.outlineGo));
+});
 
 /* 版本对照：Agent 改完登记的新版本在这里验收 —— 回答「这一轮改了哪里」 */
 
@@ -618,12 +723,14 @@ function paintVersions(shell) {
   const active = list.find(item => item.id === versionState.activeId) || list[0];
   versionState.activeId = active.id;
   const statusText = { pending: '待验收', accepted: '已验收', rejected: '已退回' };
+  const canRender = RENDERABLE_TEXT.test(active.file || "") && RENDERABLE_TEXT.test(state.path || "");
   shell.innerHTML = `
     <div class="vp-headline">
       <span class="vp-title">这一轮，改了哪里？</span>
       <span class="vp-view-toggle" role="tablist">
         <button data-vp-view="side"${versionState.view === 'side' ? ' aria-selected="true"' : ''}>并排</button>
         <button data-vp-view="rows"${versionState.view === 'rows' ? ' aria-selected="true"' : ''}>逐段</button>
+        ${versionState.view === 'side' && canRender ? `<button data-vp-side="${versionState.sideMode === 'render' ? 'text' : 'render'}">${versionState.sideMode === 'render' ? '文本' : '排版'}</button>` : ''}
       </span>
     </div>
     ${reportHtml(versionState.report)}
@@ -644,6 +751,11 @@ function paintVersions(shell) {
   shell.querySelectorAll('[data-vp-view]').forEach((button) => button.addEventListener('click', () => {
     versionState.view = button.dataset.vpView;
     paintVersions(shell);
+  }));
+  shell.querySelectorAll('[data-vp-side]').forEach((button) => button.addEventListener('click', () => {
+    versionState.sideMode = button.dataset.vpSide;
+    paintVersions(shell);
+    if (versionState.sideMode === 'render') ensureRenderedDiff(active);
   }));
   shell.querySelectorAll('[data-sb-gap]').forEach((button) => button.addEventListener('click', () => {
     const hidden = shell.querySelector(`[data-sb-hidden="${button.dataset.sbGap}"]`);
@@ -677,6 +789,17 @@ function paintVersions(shell) {
   shell.querySelector('.vp-accept').addEventListener('click', () => decideVersion(shell, 'accepted'));
   shell.querySelector('.vp-reject').addEventListener('click', () => decideVersion(shell, 'rejected'));
   if (versionState.diff === null && !versionState.loading) loadDiff(shell);
+  // srcdoc 不能内嵌进 innerHTML（内容无转义）：面板渲染完成后对占位 iframe 赋值
+  if (versionState.view === 'side' && versionState.sideMode === 'render') {
+    const rendered = versionState.rendered;
+    if (rendered && rendered.left && rendered.right) {
+      const [leftPane, rightPane] = shell.querySelectorAll('.sb-pane');
+      if (leftPane) leftPane.srcdoc = rendered.left;
+      if (rightPane) rightPane.srcdoc = rendered.right;
+    } else if (active && RENDERABLE_TEXT.test(active.file || "") && RENDERABLE_TEXT.test(state.path || "")) {
+      ensureRenderedDiff(active);
+    }
+  }
 }
 
 function reportHtml(report) {
@@ -719,9 +842,20 @@ function diffHtml(diff, active) {
   if (!diff) return `<p class="vp-hint">${escapeHtml(active && active.note ? active.note : '这一轮改了哪里：展开对照查看。')}</p>`;
   if (diff.binary) return '<p class="vp-hint">二进制成品（PDF/DOCX 等）无法逐段对照——请打开新文件人工查看。</p>';
   const { rows, removed, summary } = diff;
-  if (versionState.view === 'side') return `
-    <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>
-    ${sideBySideHtml(diff)}`;
+  if (versionState.view === 'side') {
+    const summaryLine = `<div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>`;
+    if (versionState.sideMode === 'render') {
+      const rendered = versionState.rendered;
+      if (!rendered || !rendered.left || !rendered.right) return `${summaryLine}<p class="vp-hint">排版渲染中…（可切「文本」直接看段落对照）</p>`;
+      return `${summaryLine}
+        <div class="sb-render">
+          <iframe class="sb-pane" sandbox="" referrerpolicy="no-referrer" title="修改前（排版）"></iframe>
+          <iframe class="sb-pane" sandbox="" referrerpolicy="no-referrer" title="修改后（排版）"></iframe>
+        </div>
+        <div class="sb-render-note">排版视图不执行脚本；文本级逐段对照切「文本」。</div>`;
+    }
+    return `${summaryLine}${sideBySideHtml(diff)}`;
+  }
   // 逐段视图：变化全量展示（不截断）；「未变化」折叠可展开，与「保留要求」用词区分
   return `
     <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>
@@ -745,6 +879,9 @@ async function loadDiff(shell) {
   } catch { versionState.diff = null; versionState.diffChanged = null; versionState.report = null; }
   versionState.loading = false;
   paintVersions(shell);
+  if (versionState.view === 'side' && versionState.sideMode === 'render' && RENDERABLE_TEXT.test(active.file || "") && RENDERABLE_TEXT.test(state.path || "")) {
+    ensureRenderedDiff(active);
+  }
 }
 
 async function decideVersion(shell, status) {
@@ -1901,6 +2038,7 @@ async function loadAnnotations() {
       patch(annotation.id, { x: annotation.x, y: annotation.y, event: "placed" });
     }
   }
+  extractOutline();
   renderCards();
   applyTransform();
   // 版本数轻量预取：让「版本对照」Tab 一开始就显示真实数量，而不是打开过后才正确
