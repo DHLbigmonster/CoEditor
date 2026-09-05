@@ -630,7 +630,30 @@ function paintVersions(shell) {
     paintVersions(shell);
     await loadDiff(shell);
   }));
-  shell.querySelector('#vp-open').addEventListener('click', () => { openDoc(active.file); });
+  shell.querySelector('#vp-open').addEventListener('click', async () => {
+    // 「保留的内容持续有效」：继续批注新版本时，把上一版生效中的「保留」标记带过去
+    // （仅当新版本还没有任何批注时执行一次，避免重复堆叠；锚定由新文本的模糊重定位自动完成）
+    try {
+      const oldList = await (await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`)).json();
+      const retained = (oldList.annotations || []).filter(a => a.kind === 'highlight' && a.status === 'active');
+      const newList = await (await fetch(`/api/annotations?p=${encodeURIComponent(active.file)}`)).json();
+      const fresh = (newList.annotations || []).filter(a => a.status === 'active').length === 0;
+      if (retained.length && fresh) {
+        for (const item of retained) {
+          await fetch(`/api/annotations?p=${encodeURIComponent(active.file)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              kind: 'highlight', quote: item.quote, prefix: item.prefix || '', suffix: item.suffix || '',
+              body: item.body || '（承自上一版的保留标记）', x: item.x, y: item.y,
+            }),
+          });
+        }
+        toast(`已把上一版的 ${retained.length} 个「保留」标记带到新版本`);
+      }
+    } catch { /* 继承失败不阻塞跳转 */ }
+    openDoc(active.file);
+  });
   shell.querySelector('#vp-accept').addEventListener('click', () => decideVersion(shell, 'accepted'));
   shell.querySelector('#vp-reject').addEventListener('click', () => decideVersion(shell, 'rejected'));
   if (versionState.diff === null && !versionState.loading) loadDiff(shell);

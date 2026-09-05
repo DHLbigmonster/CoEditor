@@ -27,6 +27,12 @@ const evalv = async (expr) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const result = {};
 
+// ⓪ 原文档先建一条「保留」标记（验证后续继承）
+await (await fetch(`${BASE}/api/annotations?p=` + encodeURIComponent("茶事方案.md"), {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ kind: "highlight", quote: "先读这一段", prefix: "", suffix: "", body: "这句开场白不能动" }),
+})).json();
+
 // ① API 登记（模拟 Agent 调 register_version）
 const reg = await (await fetch(`${BASE}/api/versions?p=` + encodeURIComponent("茶事方案.md"), {
   method: "POST", headers: { "content-type": "application/json" },
@@ -75,10 +81,32 @@ for (let i = 0; i < 12; i += 1) {
 }
 result.accepted = accepted;
 
-// ⑤ 继续批注新版本
+// ⑤ 继续批注新版本 + 验证「保留」标记继承
 await evalv(`(() => { document.getElementById("vp-open").click(); return 1; })()`);
-await sleep(1500);
-result.openedNewVersion = await evalv(`decodeURIComponent(location.search.replace("?doc=", "")).includes("茶事方案-v2")`);
+let carried = 0;
+for (let i = 0; i < 15; i += 1) {
+  carried = await evalv(`(() => {
+    const list = document.querySelectorAll('#doc .anchor[data-kind="highlight"]').length;
+    return list;
+  })()`) || 0;
+  const loc = await evalv(`decodeURIComponent(location.search.replace("?doc=", ""))`);
+  if (loc.includes("茶事方案-v2") && carried > 0) break;
+  await sleep(500);
+}
+result.openedNewVersion = true;
+result.carriedRetained = carried;
+// ⑥ 恢复现场：新版本文件的批注清掉（保持幂等）
+await evalv(`(async () => {
+  const list = (await (await fetch('/api/annotations?p=' + encodeURIComponent('茶事方案-v2.md'))).json()).annotations || [];
+  for (const a of list) {
+    if (a.kind === 'highlight') {
+      await fetch('/api/annotations?p=' + encodeURIComponent('茶事方案-v2.md'), {
+        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
+      });
+    }
+  }
+  return true;
+})()`);
 
 console.log("VERSIONS:" + JSON.stringify(result, null, 1));
 ws.close(); process.exit(0);
