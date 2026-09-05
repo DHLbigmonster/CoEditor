@@ -29,7 +29,7 @@ window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preve
 function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
 let feedbackFilter = 'pending';
 function feedbackTabs() {
- const labels = { pending: '待处理', retained: '保留', history: '历史' };
+ const labels = { pending: '待处理', retained: '保留', history: '历史', versions: '版本对照' };
  return '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">' + Object.entries(labels).map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + state.annotations.filter(a => feedbackGroup(a) === key).length + '</b></button>').join('') + '</div>';
 }
 document.addEventListener('click', event => { const button = event.target.closest('[data-feedback]'); if (!button) return; feedbackFilter = button.dataset.feedback; renderCards(); renderDrawer(); drawLines(); });
@@ -577,11 +577,98 @@ function renderCards() {
   host.innerHTML = "";
   if (!isCanvasMode()) host.innerHTML = '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
   const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
+  if (!isCanvasMode() && feedbackFilter === 'versions') { renderVersions(host); return; }
   for (const annotation of visible) host.appendChild(cardElement(annotation));
   if (!visible.length && !isCanvasMode()) host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">' + (feedbackFilter === 'pending' ? '没有待处理的反馈。选中文字，写下想改的地方。' : feedbackFilter === 'retained' ? '选中文字并点「保留」，留下后续修改不能动的内容。' : '处理过的反馈会留在这里，随时可以追溯。') + '</p>');
   const active = state.annotations.filter((item) => item.status === "active").length;
   $("stat-count").textContent = state.annotations.length;
   $("stat-active").textContent = active;
+}
+
+/* 版本对照：Agent 改完登记的新版本在这里验收 —— 回答「这一轮改了哪里」 */
+let versionState = { list: [], active: 0, diff: null, loading: false };
+
+async function renderVersions(host) {
+  if (!state.path) { host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">先打开一个文档。</p>'); return; }
+  const shell = document.createElement('div');
+  shell.className = 'version-panel';
+  shell.innerHTML = '<div class="vp-loading">载入版本…</div>';
+  host.appendChild(shell);
+  try {
+    const res = await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`);
+    const data = await res.json();
+    versionState.list = data.versions || [];
+  } catch { versionState.list = []; }
+  paintVersions(shell);
+}
+
+function paintVersions(shell) {
+  const list = versionState.list;
+  if (!list.length) {
+    shell.innerHTML = '<p class="feedback-empty">还没有新版本。Agent 改完文档会登记在这里，原件始终保留。</p>';
+    return;
+  }
+  const active = list[Math.min(versionState.active, list.length - 1)];
+  const statusText = { pending: '待验收', accepted: '已验收', rejected: '已退回' };
+  shell.innerHTML = `
+    <div class="vp-list" role="list">
+      ${list.map((item, i) => `<button role="listitem" class="vp-item${i === versionState.active ? ' active' : ''}" data-vp="${i}">
+        <span class="vp-round">第 ${item.round} 轮</span>
+        <span class="vp-file">${escapeHtml(item.file)}</span>
+        <span class="vp-status" data-status="${item.status}">${statusText[item.status] || item.status}</span>
+      </button>`).join('')}
+    </div>
+    <div class="vp-diff">${versionState.loading ? '对照中…' : diffHtml(versionState.diff, active)}</div>
+    <div class="vp-actions">
+      <button id="vp-open" class="primary">继续批注新版本 →</button>
+      <button id="vp-accept">验收</button>
+      <button id="vp-reject" class="danger">退回</button>
+    </div>`;
+  shell.querySelectorAll('[data-vp]').forEach((button) => button.addEventListener('click', async () => {
+    versionState.active = Number(button.dataset.vp);
+    versionState.diff = null;
+    paintVersions(shell);
+    await loadDiff(shell);
+  }));
+  shell.querySelector('#vp-open').addEventListener('click', () => { openDoc(active.file); });
+  shell.querySelector('#vp-accept').addEventListener('click', () => decideVersion(shell, 'accepted'));
+  shell.querySelector('#vp-reject').addEventListener('click', () => decideVersion(shell, 'rejected'));
+  if (versionState.diff === null && !versionState.loading) loadDiff(shell);
+}
+
+function diffHtml(diff, active) {
+  if (!diff) return `<p class="vp-hint">${escapeHtml(active && active.note ? active.note : '这一轮改了哪里：展开对照查看。')}</p>`;
+  const { rows, removed, summary } = diff;
+  const show = rows.slice(0, 60);
+  return `
+    <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 保留 ${summary.same} 段</div>
+    <div class="vp-rows">
+      ${removed.slice(0, 20).map(line => `<div class="vp-row removed"><s>${escapeHtml(line)}</s></div>`).join('')}
+      ${show.map(row => `<div class="vp-row ${row.type}">${row.type === 'added' ? '<b>+</b> ' : ''}${escapeHtml(row.text)}</div>`).join('')}
+    </div>`;
+}
+
+async function loadDiff(shell) {
+  const active = versionState.list[versionState.active];
+  if (!active) return;
+  versionState.loading = true;
+  try {
+    const res = await fetch(`/api/versions/diff?p=${encodeURIComponent(state.path)}&file=${encodeURIComponent(active.file)}`);
+    const data = await res.json();
+    versionState.diff = data.diff || null;
+  } catch { versionState.diff = null; }
+  versionState.loading = false;
+  paintVersions(shell);
+}
+
+async function decideVersion(shell, status) {
+  await fetch(`/api/versions?p=${encodeURIComponent(state.path)}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'decide', index: versionState.active, status }),
+  });
+  await renderVersions(shell);
+  toast(status === 'accepted' ? '已验收 · 可继续在新版本上批注' : '已退回 · 让 Agent 再改一版');
 }
 
 /* 卡片内联编辑批注文字 */
@@ -1588,7 +1675,7 @@ function kindOf(path) {
   return "text";
 }
 
-async function waitForPdfRenderer(timeout = 6000) {
+async function waitForPdfRenderer(timeout = 20000) { // 6s 在高负载下不够，会误报「渲染器未能加载」并放弃整篇渲染
   const start = Date.now();
   while (!window.renderPdfToContainer && Date.now() - start < timeout) {
     await new Promise((resolve) => setTimeout(resolve, 80));

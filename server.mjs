@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
 import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
+import { listVersions, registerVersion, setVersionStatus, textDiff } from './lib/version.mjs';
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 let requestQueue = Promise.resolve();
 async function queueRequest() {
@@ -237,6 +238,53 @@ const server = http.createServer(async (req, res) => {
       const data = await readSidecar(); if (ensureAnnotationNos(data)) await writeSidecar(data);
       return send(200, JSON.stringify(reviewSnapshot(data, url.searchParams.get('p'))));
     }
+    if (url.pathname === '/api/versions') {
+      const doc = url.searchParams.get('p');
+      if (!doc) return send(400, JSON.stringify({ error: 'doc required' }));
+      if (req.method === 'GET') {
+        const data = await readSidecar();
+        return send(200, JSON.stringify({ doc, versions: listVersions(data, doc) }));
+      }
+      const body = await readJson(req);
+      const data = await readSidecar();
+      try {
+        if (body.action === 'register') {
+          // 新版本文件必须真实存在，且与原件不同（原件永不被覆盖）
+          const target = safeResolve(body.file);
+          if (!target) return send(400, JSON.stringify({ error: 'invalid path' }));
+          await stat(target).catch(() => { throw new Error('version file not found'); });
+          const entry = registerVersion(data, { doc, file: body.file, note: body.note });
+          await writeSidecar(data);
+          return send(200, JSON.stringify({ ok: true, version: entry }));
+        }
+        if (body.action === 'decide') {
+          const entry = setVersionStatus(data, doc, Number(body.index), body.status === 'rejected' ? 'rejected' : 'accepted');
+          await writeSidecar(data);
+          return send(200, JSON.stringify({ ok: true, version: entry }));
+        }
+        return send(400, JSON.stringify({ error: 'unsupported action' }));
+      } catch (error) {
+        return send(400, JSON.stringify({ error: String(error && error.message || error) }));
+      }
+    }
+
+    // 版本对照：原文 vs 新版本（段落级），回答「这一轮改了哪里」
+    if (url.pathname === '/api/versions/diff') {
+      const doc = url.searchParams.get('p');
+      const file = url.searchParams.get('file');
+      if (!doc || !file) return send(400, JSON.stringify({ error: 'doc and file required' }));
+      const originalPath = safeResolve(doc);
+      const versionPath = safeResolve(file);
+      if (!originalPath || !versionPath) return send(400, JSON.stringify({ error: 'invalid path' }));
+      try {
+        const original = await readFile(originalPath, 'utf8');
+        const next = await readFile(versionPath, 'utf8');
+        return send(200, JSON.stringify({ doc, file, diff: textDiff(original, next) }));
+      } catch (error) {
+        return send(400, JSON.stringify({ error: String(error && error.message || error) }));
+      }
+    }
+
     if (url.pathname === '/api/resolve' && req.method === 'POST') {
       const body = await readJson(req), data = await readSidecar();
       const result = resolveReviewed(data, { ...body, doc: url.searchParams.get('p') || body.doc });

@@ -6,6 +6,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 import { acquireStoreLock, readStore, writeStore } from './lib/store.mjs';
 import { reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
+import { registerVersion } from './lib/version.mjs';
 const ROOT = resolve(process.argv[2] || process.cwd());
 const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
@@ -80,6 +81,20 @@ const TOOLS = [
         versions: { type: "object", additionalProperties: { type: "number" }, description: "读取时的版本，键为 ids 中的编号。版本变化拒绝归档，防止覆盖人刚加的要求。" },
       },
       required: ["doc", "ids", "versions"],
+    },
+  },
+  {
+    name: "register_version",
+    description:
+      "【产出新版本后必调】把你改写后的新文件登记给 CoEditor：新版本必须另存为新文件放在原文件旁边（绝不覆盖原件），登记后人在「版本对照」里看到这一轮改了哪里并验收。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        doc: { type: "string", description: "原文档相对路径" },
+        file: { type: "string", description: "新版本文件的相对路径（必须已存在，且与原件不同）" },
+        note: { type: "string", description: "可选：一句话说明这一轮改了什么" },
+      },
+      required: ["doc", "file"],
     },
   },
   {
@@ -273,6 +288,17 @@ async function callTool(name, args = {}) {
       const item = (await loadAnnotations(args.doc)).find((entry) => entry.id === args.id || entry.no === args.id);
       if (!item) throw new Error(`annotation ${args.id} not found`);
       return item;
+    }
+    case "register_version": {
+      const data = await loadSidecar();
+      if (!args.doc || !args.file) return { error: "doc and file required" };
+      if (String(args.file) === String(args.doc)) return { error: "version file must differ from the original" };
+      // 新版本文件必须真实存在：登记一个不存在的文件会让人验收时扑空
+      const versionPath = join(ROOT, args.file);
+      if (!await stat(versionPath).catch(() => null)) return { error: `version file not found: ${args.file}` };
+      const entry = registerVersion(data, { doc: args.doc, file: args.file, note: args.note });
+      await saveSidecar(data);
+      return { ok: true, version: entry };
     }
     case "resolve_annotations": {
       const data = await loadSidecar(); const result = resolveReviewed(data, args);

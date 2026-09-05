@@ -9,18 +9,28 @@ const send = (m, p = {}) => new Promise((res, rej) => { const k = ++id; pm.set(k
 ws.on("message", (d) => { const m = JSON.parse(d); if (m.id && pm.has(m.id)) { const p = pm.get(m.id); pm.delete(m.id); m.error ? p.rej(new Error(JSON.stringify(m.error))) : p.res(m.result); } });
 await new Promise((r) => ws.on("open", r));
 const evalv = async (expr) => {
-  const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
-  if (ev.exceptionDetails) throw new Error("eval: " + JSON.stringify(ev.exceptionDetails).slice(0, 300));
-  return ev.result ? ev.result.value : undefined;
+  try {
+    const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
+    if (ev.exceptionDetails) return { __err: JSON.stringify(ev.exceptionDetails.exception || ev.exceptionDetails).slice(0, 200) };
+    return ev.result ? ev.result.value : undefined;
+  } catch (error) { return { __err: String(error).slice(0, 200) }; }
+};
+// 不抛错版本：等待 app.js 就绪期间（state 可能尚未声明）专用
+const evalSafe = async (expr) => {
+  try {
+    const ev = await send("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
+    return ev.result ? ev.result.value : undefined;
+  } catch { return undefined; }
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 
 await send("Page.navigate", { url: "http://127.0.0.1:4401/?doc=" + encodeURIComponent("长文档测试-12页.pdf") });
 await sleep(1000);
 // 先等 app.js 就绪（state 存在），再等 12 页结构
 for (let i = 0; i < 80; i += 1) {
-  const ready = await evalv(`typeof state !== "undefined"`).catch(() => false);
-  if (ready) break;
+  const ready = await evalSafe(`typeof state !== "undefined"`);
+  if (ready === true) break;
   await sleep(250);
 }
 for (let i = 0; i < 60; i += 1) { // 高负载下 PDF 首屏可能很慢，给足耐心
@@ -45,6 +55,13 @@ const afterScroll = await counts();
 await evalv(`(() => { const vp = document.getElementById("viewport"); vp.scrollTo({ top: 0 }); return 1; })()`);
 await sleep(1200);
 const backTop = await counts();
+const diag = await evalv(`(() => ({
+  docHtml: (document.getElementById("doc") || { innerHTML: "" }).innerHTML.slice(0, 200),
+  pdfjsGlobal: typeof window.pdfjsLib,
+  scriptTags: [...document.querySelectorAll("script")].map(x => (x.src || "inline").split("/").pop()).join(","),
+  toast: document.getElementById("toast").textContent.slice(0, 100),
+}))()`);
+console.log("DIAG:", JSON.stringify(diag));
 console.log("LAZY:", JSON.stringify({
   structure: before,
   initial,

@@ -1176,3 +1176,35 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
 .pptx-guide .pg-steps li { font-size: 13px; line-height: 1.9; margin-bottom: 8px; }
 .pptx-guide .pg-steps b { color: var(--active); font-weight: 600; }
 .pptx-guide .pg-note { font-size: 11.5px; color: var(--paper-ink-dim); line-height: 1.8; border-top: 1px dashed var(--line); padding-top: 12px; }
+
+/* ================= v0.9.6 · 版本对照面板（Agent 改完 → 人验收 → 继续批注） ================= */
+.version-panel { padding: 2px 0 4px; }
+.vp-loading, .vp-hint { font-size: 11.5px; color: var(--ink-faint); padding: 6px 2px; }
+.vp-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.vp-item {
+  display: flex; align-items: center; gap: 8px; text-align: left;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-dim);
+  border-radius: 9px; padding: 7px 9px; font-size: 11.5px; cursor: pointer;
+}
+.vp-item.active { background: #eeeae1; color: var(--ink); border-color: rgba(70, 58, 42, .22); }
+.vp-round { font: 500 10.5px/1 "SF Mono", Menlo, monospace; color: var(--ink-faint); flex: none; }
+.vp-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vp-status { flex: none; font-size: 10.5px; padding: 2px 7px; border-radius: 20px; background: rgba(69, 57, 42, .08); }
+.vp-status[data-status="pending"] { color: #b44131; background: rgba(238, 107, 80, .14); }
+.vp-status[data-status="accepted"] { color: #4f7a45; background: rgba(111, 159, 97, .16); }
+.vp-diff { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 9px; padding: 8px; }
+.vp-summary { font-size: 11px; color: var(--ink-faint); margin-bottom: 7px; }
+.vp-rows { display: flex; flex-direction: column; gap: 4px; }
+.vp-row {
+  font-size: 11.5px; line-height: 1.6; padding: 4px 7px; border-radius: 6px;
+  background: transparent; color: var(--ink-dim);
+}
+.vp-row.added { background: rgba(111, 159, 97, .13); color: var(--ink); }
+.vp-row.removed { background: rgba(238, 107, 80, .1); color: var(--ink-faint); }
+.vp-actions { display: flex; gap: 6px; margin-top: 10px; }
+.vp-actions button {
+  border: none; cursor: pointer; font-size: 11.5px; padding: 6px 11px; border-radius: 8px;
+  background: rgba(69, 57, 42, .07); color: var(--ink-dim);
+}
+.vp-actions .primary { background: var(--active); color: #fff; font-weight: 500; }
+.vp-actions .danger { color: #b44131; }
