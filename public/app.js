@@ -1832,6 +1832,12 @@ async function openDoc(path, { push = true } = {}) {
     state.mtime = 0;
   }
   $("docpath").textContent = path;
+  // 阅读时长估算（文本类文档；中文约 400 字/分钟，HTML 按剥标签后正文计）
+  if (state.mode === "text") {
+    const plain = /\.html?$/i.test(path) ? String(state.text || "").replace(/<[^>]+>/g, " ") : String(state.text || "");
+    const minutes = Math.max(1, Math.round(plain.replace(/\s/g, "").length / 400));
+    $("docpath").textContent = `${path} · 约 ${minutes} 分钟`;
+  }
   document.querySelectorAll("#tree .file").forEach((node) => node.classList.toggle("current", node.dataset.path === path));
   $("empty").style.display = "none";
   $("btn-export").hidden = state.mode !== "image";
