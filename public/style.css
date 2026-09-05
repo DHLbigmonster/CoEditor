@@ -1208,3 +1208,30 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
 }
 .vp-actions .primary { background: var(--active); color: #fff; font-weight: 500; }
 .vp-actions .danger { color: #b44131; }
+
+/* ================= v0.9.8 · 首次使用引导 ================= */
+#empty { text-align: center; }
+#empty .e-slogan { font-size: 17px; color: var(--ink); margin: 0 0 26px; letter-spacing: .02em; }
+#empty .e-steps { display: flex; flex-direction: column; gap: 10px; max-width: 380px; margin: 0 auto 26px; text-align: left; }
+#empty .e-step {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: rgba(255, 254, 250, .72); border: 1px solid var(--line); border-radius: 10px;
+  padding: 11px 14px; font-size: 12.5px; line-height: 1.7; color: var(--ink-dim);
+}
+#empty .e-step b {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--active); color: #fff; font-size: 11px;
+  display: flex; align-items: center; justify-content: center; margin-top: 2px;
+}
+#empty .e-hint { font-size: 11px; color: var(--ink-faint); margin: 0; }
+#empty .e-hint b { color: var(--ink-dim); }
+
+/* 布局修正：slogan 与三步引导垂直居中排列（覆盖旧 flex-row） */
+#empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0;
+}
+#empty .e-steps { flex-direction: row; gap: 12px; max-width: none; margin: 0 auto 20px; }
+#empty .e-step { max-width: 250px; align-items: center; }
+#empty .e-step span { text-align: left; }
+#empty .e-slogan { margin-bottom: 30px; }
