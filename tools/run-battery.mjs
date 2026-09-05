@@ -2,16 +2,22 @@
 // 用法：node tools/run-battery.mjs   （需 headless Chrome 9333 常驻）
 // 退出码 0 = 全绿；非 0 = 有失败（CI 可用）
 import { spawn, execFileSync } from "node:child_process";
-import { cpSync, rmSync } from "node:fs";
+import { cpSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from 'node:os';
+import net from 'node:net';
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
-const PORT = 4401;
+const probe = net.createServer();
+await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+const PORT = probe.address().port;
+await new Promise(resolve => probe.close(resolve));
 const BASE = `http://127.0.0.1:${PORT}`;
-const VAULT = "/tmp/coeditor-battery";
-const AWAY = "/tmp/coeditor-battery-away";
+const TEST_ROOT = mkdtempSync(path.join(tmpdir(), 'coeditor-battery-'));
+const VAULT = path.join(TEST_ROOT, 'vault');
+const AWAY = path.join(TEST_ROOT, 'away');
 
 process.env.COEDITOR_E2E_BASE = BASE;
 process.env.COEDITOR_E2E_COPY = VAULT;
@@ -31,9 +37,7 @@ try {
 }
 
 // 备 vault（copy of copy：绝不写入仓库内的 sample）
-rmSync(VAULT, { recursive: true, force: true });
 cpSync(path.join(ROOT, "sample"), VAULT, { recursive: true });
-rmSync(AWAY, { recursive: true, force: true });
 process.env.COEDITOR_E2E_BASE_VAULT = VAULT;
 
 // 生成 12 页长文档（pdf-lazy 依赖）
@@ -41,7 +45,13 @@ execFileSync(process.execPath, [path.join(HERE, "make-long-pdf.mjs")], { stdio: 
 
 // 起隔离服务
 const server = spawn(process.execPath, [path.join(ROOT, "server.mjs"), VAULT], {
-  env: { ...process.env, COEDITOR_PORT: String(PORT), COEDITOR_DISABLE_NATIVE_PICKER: "1" },
+  env: {
+    ...process.env,
+    COEDITOR_PORT: String(PORT),
+    COEDITOR_DISABLE_NATIVE_PICKER: "1",
+    // 全局状态（最近打开的目录）默认写 ~/.coeditor —— 电池必须隔离，绝不污染用户 home
+    COEDITOR_STATE_DIR: `${VAULT}-state`,
+  },
   stdio: "ignore",
 });
 let ready = false;
@@ -76,6 +86,7 @@ const suites = [
   ["v0.9.2：新建文档 / 成品定位源码 / MCP resolve 闭环 / 顶栏减负", "eval-v092.mjs", [["apiCreated\": true", 1], ["dupBlocked\": true", 1], ["traversalSanitized\": true", 1], ["resolveMarked\": true", 1], ["constraintsDropped\": true", 1], ["editSplitShown\": true", 1], ["clickLocated\": true", 1], ["selectionLocated\": true", 1], ["uiCreated\": true", 1], ["uiEditOpened\": true", 1], ["topbarLean\": true", 1]]],
   ["v0.9.3：修改指令落盘为 .md（同名自动 -2，绝不覆盖）", "eval-brief.mjs", [["annCreated\": true", 1], ["panelShown\": true", 1], ["treeHasBrief\": true", 1], ["brief1Exists\": true", 1], ["brief1HasAnnotationNo\": true", 1], ["brief1HasQuote\": true", 1], ["brief1HasTargetFile\": true", 1], ["brief2Exists\": true", 1], ["brief1WrittenFirst\": true", 1], ["briefHasStamp\": true", 1]]],
   ["v0.9.3：批注卡 ↔ 正文 悬停互链（双向 + 离开复位）", "eval-peek.mjs", [["annCreated\": true", 1], ["anchorCount\": 1", 1], ["drawerItems\": 1", 1], ["cardToDoc\": true", 1], ["cardToDocCleared\": true", 1], ["docToCard\": true", 1], ["docToCardCleared\": true", 1]]],
+  ["v0.9.5：多 vault 最近打开记录（去重/置顶/失效过滤/点击直切）", "eval-recent.mjs", [["deduped\": true", 1], ["newestFirst\": true", 1], ["modalOpen\": true", 1], ["recentCount\": 2", 1], ["currentMarked\": true", 1], ["clickedSwitched\": true", 1]]],
 ];
 
 const results = [];
@@ -100,8 +111,7 @@ for (const [name, script, criteria] of suites) {
 }
 
 server.kill();
-rmSync(VAULT, { recursive: true, force: true });
-rmSync(AWAY, { recursive: true, force: true });
+rmSync(TEST_ROOT, { recursive: true, force: true });
 
 const passed = results.filter((r) => r.ok).length;
 console.log(`\n📊 ${passed}/${results.length} 套件通过${passed === results.length ? " —— 发布门禁通过" : " —— 存在失败，禁止发布"}`);

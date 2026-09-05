@@ -17,10 +17,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 await send("Page.navigate", { url: "http://127.0.0.1:4401/?doc=" + encodeURIComponent("长文档测试-12页.pdf") });
 await sleep(1000);
-for (let i = 0; i < 24; i += 1) {
+// 先等 app.js 就绪（state 存在），再等 12 页结构
+for (let i = 0; i < 80; i += 1) {
+  const ready = await evalv(`typeof state !== "undefined"`).catch(() => false);
+  if (ready) break;
+  await sleep(250);
+}
+for (let i = 0; i < 60; i += 1) { // 高负载下 PDF 首屏可能很慢，给足耐心
   const n = await evalv(`document.querySelectorAll("#doc .pdf-page").length`);
   if (n >= 12) break;
-  await sleep(400);
+  await sleep(500);
 }
 const counts = () => evalv(`(() => ({
   pages: document.querySelectorAll("#doc .pdf-page").length,

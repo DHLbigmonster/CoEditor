@@ -7,6 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="alternate icon" type="image/png" href="/favicon.png" />
 <link rel="stylesheet" href="/style.css" />
+<link rel="stylesheet" href="/review.css" />
 <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css" />
 <link rel="stylesheet" href="/vendor/codemirror/addon/dialog/dialog.css" />
 </head>
@@ -18,14 +19,17 @@
       <span>CoEditor</span>
     </div>
     <div class="vault" id="vault"></div>
+    <button id="btn-recent" class="ghost" title="查看最近打开的本地文件夹">最近打开</button>
     <button id="btn-vault" class="ghost" title="像 VSCode 一样打开另一个本地文件夹">打开文件夹…</button>
   </div>
   <div class="rail-scroll">
     <div class="rail-label"><span>文档</span><button id="btn-new-file" title="新建文档（Markdown / TXT / HTML）">＋</button></div>
+    <input id="file-search" type="search" placeholder="查找文件…" aria-label="查找文件" />
     <div id="tree" class="tree"></div>
   </div>
   <div class="rail-foot">
     <div class="stat"><span id="stat-count">0</span> 条批注 · <span id="stat-active">0</span> 当前</div>
+    <div id="sync-status" role="status" aria-live="polite">本地工作区</div>
     <div class="hint">Agent 读取：<code id="api-hint">/api/constraints</code></div>
   </div>
 </aside>
@@ -39,7 +43,7 @@
       <span id="workspace-modes" class="seg mode-seg" title="阅读、编辑与自由画布各自使用最合适的交互">
         <button data-workspace-mode="read" class="active">阅读</button>
         <button data-workspace-mode="edit">编辑</button>
-        <button data-workspace-mode="canvas">画布</button>
+        <button data-workspace-mode="canvas" title="用于图片、箭头和新旧稿的空间排布；普通阅读不需要">空间批注</button>
       </span>
       <button id="btn-drawer" class="chip">批注</button>
       <button id="btn-export" class="chip" hidden>导出标注图</button>
@@ -130,7 +134,7 @@
 
 <aside id="drawer" hidden>
   <div class="d-head">
-    <span>批注历史 · 按批次</span>
+    <span>文档反馈</span>
     <button id="drawer-copy" class="chip">复制</button>
     <button id="drawer-close" class="icon">✕</button>
   </div>
@@ -189,6 +193,10 @@
     <div class="fs-head">
       <span>选择要打开的文件夹</span>
       <button id="fs-close" class="icon">✕</button>
+    </div>
+    <div class="fs-recent-wrap" id="fs-recent-wrap" hidden>
+      <div class="fs-recent-label">最近打开</div>
+      <div class="fs-recent" id="fs-recent"></div>
     </div>
     <div class="fs-quick" id="fs-quick"></div>
     <div class="fs-crumb" id="fs-crumb"></div>

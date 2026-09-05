@@ -7,12 +7,31 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
+import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
+const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+let requestQueue = Promise.resolve();
+async function queueRequest() {
+ const previous = requestQueue; let release;
+ requestQueue = new Promise(resolve => { release = resolve; });
+ await previous; return release;
+}
+async function readJson(req) {
+ let raw = ''; for await (const chunk of req) {
+  raw += chunk; if (raw.length > 32 * 1024 * 1024) throw new Error('request-too-large');
+ } return raw ? JSON.parse(raw) : {};
+}
 const execFileAsync = promisify(execFile);
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 let ROOT = resolve(process.argv[2] || process.cwd());
 const PORT = Number(process.env.COEDITOR_PORT || 4400);
 let SIDECAR = join(ROOT, ".marginalia", "annotations.json");
+// 跨 vault 的全局状态（最近打开的目录）。默认 ~/.coeditor；
+// 电池等隔离场景用 COEDITOR_STATE_DIR 指到临时目录，绝不写用户真实 home。
+const STATE_DIR = process.env.COEDITOR_STATE_DIR || join(homedir(), ".coeditor");
+const RECENT_FILE = join(STATE_DIR, "recent-vaults.json");
+const RECENT_MAX = 8;
 
 function setVault(next) {
   ROOT = next;
@@ -43,59 +62,26 @@ function safeResolve(relPath) {
   return target;
 }
 
-async function readSidecar() {
+/* ---------- 最近打开的目录：全局记录，切 vault 与启动时各记一次 ---------- */
+async function readRecent() {
   try {
-    return JSON.parse(await readFile(SIDECAR, "utf8"));
-  } catch (err) {
-    // 文件不存在 = 首次使用，给空结构；存在但读不了 = 数据危险，拒绝服务（绝不返回空结构，防止空壳覆盖）
-    if (err && err.code === "ENOENT") return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
-    throw new Error(`sidecar-unreadable: ${String(err && err.message || err)}`);
-  }
+    const data = JSON.parse(await readFile(RECENT_FILE, "utf8"));
+    return Array.isArray(data.vaults) ? data.vaults.filter((entry) => entry && typeof entry.path === "string") : [];
+  } catch { return []; } // 首次无文件 / 文件损坏都当作空
 }
 
-/* 防破坏保存（借鉴 Cowart blocked-destructive-image-loss）：
-   批注与画布元素永不无故消失——写盘瞬间任一集合数量减少，直接拒绝保存。
-   读不了当前状态时也拒绝写：宁可失败，绝不拿空/半读数据覆盖事实源 */
-const CANVAS_KEYS = ["arrows", "notes", "images", "drafts"];
-async function writeSidecar(data, opts = {}) {
-  let current = null;
-  let currentRaw = null;
+async function noteRecent(dir) {
+  const list = await readRecent();
+  const next = [{ path: dir, at: Date.now() }, ...list.filter((entry) => entry.path !== dir)].slice(0, RECENT_MAX);
   try {
-    currentRaw = await readFile(SIDECAR, "utf8");
-    current = JSON.parse(currentRaw);
-  } catch (err) {
-    // 文件不存在 = 首次创建，合法跳过守卫；存在但读不了 = 拒绝写（绝不拿空数据覆盖事实源）
-    if (!err || err.code !== "ENOENT") throw new Error(`sidecar-unreadable-refusing-write: ${String(err && err.message || err)}`);
-  }
-  if (current) {
-    const countDocs = (d) => Object.values(d.docs || {}).reduce((acc, list) => acc + (Array.isArray(list) ? list.length : 0), 0);
-    const beforeDocs = countDocs(current);
-    const afterDocs = countDocs(data);
-    if (beforeDocs > afterDocs + (opts.allowedRemovals || 0)) {
-      throw new Error(`blocked-destructive-annotation-loss: ${beforeDocs} -> ${afterDocs}`);
-    }
-    for (const key of CANVAS_KEYS) {
-      const before = Array.isArray(current[key]) ? current[key].length : 0;
-      const after = Array.isArray(data[key]) ? data[key].length : 0;
-      const allowed = Number(opts.allowedCanvasRemovals?.[key] || 0);
-      if (before > after + allowed) {
-        throw new Error(`blocked-destructive-canvas-loss: ${key} ${before} -> ${after}`);
-      }
-    }
-    // 写前轮转备份：当前版本原样留存 prev.json，任何事故一步回滚（cp prev.json annotations.json）
-    try {
-      await writeFile(`${SIDECAR}.prev`, currentRaw, "utf8");
-    } catch { /* 备份失败不阻塞正常写 */ }
-  }
-  for (const key of CANVAS_KEYS) {
-    if (!Array.isArray(data[key])) data[key] = [];
-  }
-  await mkdir(dirname(SIDECAR), { recursive: true });
-  // 原子写：先写临时文件再 rename，避免并发/中断导致 sidecar 截断
-  const tmp = `${SIDECAR}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, SIDECAR);
+    await mkdir(STATE_DIR, { recursive: true });
+    await writeFile(RECENT_FILE, JSON.stringify({ vaults: next }, null, 2), "utf8");
+  } catch { /* 家目录不可写时不阻塞主流程 */ }
+  return next;
 }
+
+const readSidecar = () => readStore(SIDECAR);
+const writeSidecar = (data, opts) => writeStore(SIDECAR, data, opts);
 
 /* 批注显示号：no = "批次-序号"（0-1、0-2……第 0 批次第 1 条），用户可读、Agent 引用同号。
    读时懒迁移：存量无 no 的批注按 round 分组、组内存储顺序编号，写回固化（删除不影响已有编号）。 */
@@ -230,7 +216,33 @@ const server = http.createServer(async (req, res) => {
     res.end(body);
   };
 
+  let releaseQueue, releaseStore;
   try {
+    const origin = req.headers.origin;
+    if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && origin &&
+        ![`http://127.0.0.1:${server.address().port}`, `http://localhost:${server.address().port}`].includes(origin)) {
+      return send(403, JSON.stringify({ error: 'untrusted-origin' }));
+    }
+    // The picker can remain open for minutes; it must not block state transactions.
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/folder-picker') {
+      releaseQueue = await queueRequest();
+      if (/^\/api\/(annotations|constraints|rounds|canvas|supersede|sync|review|resolve)(?:\/|$)/.test(url.pathname)) releaseStore = await acquireStoreLock(SIDECAR);
+    }
+    if (url.pathname === '/api/sync') {
+      const data = await readSidecar(); const target = safeResolve(url.searchParams.get('p'));
+      const info = target ? await stat(target).catch(() => null) : null;
+      return send(200, JSON.stringify({ root: ROOT, version: APP_VERSION, revision: data.revision || 0, mtime: info?.mtimeMs || 0 }));
+    }
+    if (url.pathname === '/api/review') {
+      const data = await readSidecar(); if (ensureAnnotationNos(data)) await writeSidecar(data);
+      return send(200, JSON.stringify(reviewSnapshot(data, url.searchParams.get('p'))));
+    }
+    if (url.pathname === '/api/resolve' && req.method === 'POST') {
+      const body = await readJson(req), data = await readSidecar();
+      const result = resolveReviewed(data, { ...body, doc: url.searchParams.get('p') || body.doc });
+      if (result.resolved.length) await writeSidecar(data);
+      return send(200, JSON.stringify(result));
+    }
     if (url.pathname.startsWith("/api/tree")) {
       return send(200, JSON.stringify({ root: ROOT, tree: await listTree() }));
     }
@@ -250,11 +262,7 @@ const server = http.createServer(async (req, res) => {
 
     /* ---------- 编辑写回：文本文件保存（VSCode 式编辑态） ---------- */
     if (url.pathname.startsWith("/api/write")) {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const target = safeResolve(url.searchParams.get("p") || body.p);
       if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
       if (!TEXT_EXT.has(extname(target).toLowerCase())) return send(400, JSON.stringify({ error: "unsupported extension" }));
@@ -263,18 +271,19 @@ const server = http.createServer(async (req, res) => {
       if (info && Number.isFinite(body.baseMtime) && info.mtimeMs !== body.baseMtime) {
         return send(409, JSON.stringify({ error: "file-changed-externally", mtime: info.mtimeMs }));
       }
-      await writeFile(target, body.text);
+      if (info) {
+        const backup = join(ROOT, '.marginalia', 'document-backups'); await mkdir(backup, { recursive: true });
+        const { createHash } = await import('node:crypto');
+        await atomicWrite(join(backup, createHash('sha256').update(target).digest('hex') + '.prev'), await readFile(target, 'utf8'));
+      }
+      await atomicWrite(target, body.text);
       const after = await stat(target);
       return send(200, JSON.stringify({ ok: true, mtime: after.mtimeMs }));
     }
 
     /* ---------- 新建文档：侧栏「＋」入口。重名不覆盖（wx），越界与特殊字符消毒 ---------- */
     if (url.pathname === "/api/create-file" && req.method === "POST") {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const wantedExt = [".md", ".txt", ".html"].includes(String(body.ext || "").toLowerCase()) ? String(body.ext).toLowerCase() : ".md";
       const clean = String(body.name || "")
         .trim()
@@ -304,11 +313,7 @@ const server = http.createServer(async (req, res) => {
     /* ---------- 「交给 Agent」把修改指令落成 vault 里的 .md ----------
        同名自动加 -2/-3 后缀；即使并发也用 wx 保证绝不覆盖已有文件（改写提案/润色提案是人的资产）。 */
     if (url.pathname === "/api/save-brief" && req.method === "POST") {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const text = String(body.text || "");
       if (!text.trim()) return send(400, JSON.stringify({ error: "empty" }));
       const clean = String(body.name || "")
@@ -339,21 +344,17 @@ const server = http.createServer(async (req, res) => {
 
     /* ---------- 批次：一次「保存本批次」或一次外部修改 = 推进一轮 ---------- */
     if (url.pathname.startsWith("/api/rounds")) {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const data = await readSidecar();
       if (body.action === "save") {
-        const closed = data.activeRound ?? 0;
-        data.activeRound = closed + 1;
+        const doc = url.searchParams.get('p'); const closed = currentRound(data, doc);
+        if (doc) { data.docRounds ||= {}; data.docRounds[doc] = closed + 1; } else data.activeRound = closed + 1;
         data.roundHistory = data.roundHistory || [];
         data.roundHistory.push({ round: closed, closedAt: new Date().toISOString() });
         await writeSidecar(data);
-        return send(200, JSON.stringify({ ok: true, closed, activeRound: data.activeRound }));
+        return send(200, JSON.stringify({ ok: true, closed, activeRound: currentRound(data, doc) }));
       }
-      return send(200, JSON.stringify({ activeRound: data.activeRound ?? 0 }));
+      return send(200, JSON.stringify({ activeRound: currentRound(data, url.searchParams.get('p')) }));
     }
 
     /* ---------- 切换 vault（VSCode 式打开本地文件夹） ---------- */
@@ -361,16 +362,23 @@ const server = http.createServer(async (req, res) => {
       // 页面轮询先验 vault：服务端目录被其他端切换时，避免用同相对路径读到别的文件而误判「外部修改」
       return send(200, JSON.stringify({ root: ROOT }));
     }
+    if (url.pathname === "/api/recent-vaults" && req.method === "GET") {
+      const list = await readRecent();
+      const vaults = [];
+      for (const entry of list) {
+        const info = await stat(entry.path).catch(() => null);
+        if (info && info.isDirectory()) vaults.push({ ...entry, current: entry.path === ROOT });
+      }
+      return send(200, JSON.stringify({ vaults })); // 只回存在的：目录被删/改名就不该再出现在列表里
+    }
+
     if (url.pathname.startsWith("/api/vault") && req.method === "POST") {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const next = resolve(String(body.path || "").trim());
       const info = await stat(next).catch(() => null);
       if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
       setVault(next);
+      await noteRecent(next);
       return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
     }
 
@@ -413,11 +421,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname.startsWith("/api/supersede")) {
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
       const data = await readSidecar();
       const list = data.docs[url.searchParams.get("p")] || [];
       const winner = list.find((entry) => entry.id === body.winner);
@@ -467,11 +471,7 @@ const server = http.createServer(async (req, res) => {
       for (const key of ["arrows", "notes", "images", "drafts"]) {
         if (!Array.isArray(data[key])) data[key] = [];
       }
-      const body = req.method === "GET" ? {} : await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = req.method === "GET" ? {} : await readJson(req);
 
       if (url.pathname.endsWith("/arrows")) {
         if (req.method === "GET") return send(200, JSON.stringify({ arrows: data.arrows }));
@@ -634,11 +634,7 @@ const server = http.createServer(async (req, res) => {
     /* UI 状态：前端上报当前文档/选中/视口，MCP get_ui_state 读取（Cowart get_selection 对应物） */
     if (url.pathname.startsWith("/api/ui-state")) {
       if (req.method === "POST") {
-        const body = await new Promise((ok) => {
-          let raw = "";
-          req.on("data", (chunk) => (raw += chunk));
-          req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-        });
+        const body = await readJson(req);
         uiState = {
           path: typeof body.path === "string" ? body.path : null,
           selected: body.selected || null,
@@ -660,14 +656,10 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === "GET") {
         if (ensureAnnotationNos(data)) await writeSidecar(data); // 懒迁移存量编号
-        return send(200, JSON.stringify({ path: key, annotations: list }));
+        return send(200, JSON.stringify({ path: key, revision: data.revision || 0, annotations: list.map(a => ({ ...a, version: annotationVersion(a) })) }));
       }
 
-      const body = await new Promise((ok) => {
-        let raw = "";
-        req.on("data", (chunk) => (raw += chunk));
-        req.on("end", () => ok(raw ? JSON.parse(raw) : {}));
-      });
+      const body = await readJson(req);
 
       if (req.method === "POST") {
         const KINDS = new Set(["region", "text", "highlight", "strike"]);
@@ -676,11 +668,17 @@ const server = http.createServer(async (req, res) => {
         if (!isMark && kind !== "region" && !(body.body || "").trim()) {
           return send(400, JSON.stringify({ error: "annotation body required" }));
         }
+        const round = currentRound(data, key);
+        data.counters ||= {}; const counters = data.counters[key] ||= {};
+        const nextNumber = Number(allocateNo(list, round).split('-')[1]);
+        counters[round] = Math.max(counters[round] || 0, nextNumber - 1) + 1;
+        const { randomUUID } = await import('node:crypto');
         const item = {
-          id: nextSeq(list, "A"),
-          no: allocateNo(list, Number.isFinite(data.activeRound) ? data.activeRound : 0),
+          id: 'A-' + randomUUID(),
+          version: 1,
+          no: `${round}-${counters[round]}`,
           kind,
-          round: Number.isFinite(data.activeRound) ? data.activeRound : 0,
+          round,
           quote: body.quote || "",
           prefix: body.prefix || "",
           suffix: body.suffix || "",
@@ -711,7 +709,9 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "PATCH") {
         const item = list.find((entry) => entry.id === body.id);
         if (!item) return send(404, JSON.stringify({ error: "not found" }));
-        for (const field of ["body", "status", "weight", "x", "y", "quote", "kind", "region", "image"]) {
+        if (body.version !== undefined && body.version !== annotationVersion(item)) return send(409, JSON.stringify({ error: 'annotation-changed-externally' }));
+        if (['body', 'status', 'quote', 'kind', 'region', 'image'].some(key => body[key] !== undefined && JSON.stringify(body[key]) !== JSON.stringify(item[key]))) item.version = annotationVersion(item) + 1;
+        for (const field of ["body", "status", "weight", "x", "y", "quote", "kind", "region", "image", "anchorStatus"]) {
           if (body[field] !== undefined) item[field] = body[field];
         }
         item.history = item.history || [];
@@ -751,11 +751,15 @@ const server = http.createServer(async (req, res) => {
     }
   } catch (error) {
     send(500, JSON.stringify({ error: String(error && error.message ? error.message : error) }));
+  } finally {
+    try { if (releaseStore) await releaseStore(); } finally { if (releaseQueue) releaseQueue(); }
   }
 });
+server.requestTimeout = 30000;
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`CoEditor ready → http://127.0.0.1:${PORT}`);
+  console.log(`CoEditor ready → http://127.0.0.1:${server.address().port}`);
   console.log(`vault: ${ROOT}`);
   console.log(`sidecar: ${SIDECAR}`);
+  noteRecent(ROOT).catch(() => {}); // 命令行直接 open 的目录也算一次「最近打开」
 });

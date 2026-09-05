@@ -75,9 +75,13 @@ if (result.md && !result.md.error) {
   // 点浮条「保留」
   await evaluate(`document.querySelector('#sel-menu [data-sel-act="highlight"]').click()`);
   await sleep(900);
+  // 保留类批注在「保留」分组下渲染（默认停在「待处理」），断言前先切过去
+  await sleep(600);
+  await evaluate(`(() => { const tab = document.querySelector('[data-feedback="retained"]'); if (tab) tab.click(); return !!tab; })()`);
+  await sleep(600);
   result.mdHighlight = await evaluate(`(() => {
     const mark = document.querySelector('#doc mark.anchor[data-kind="highlight"]');
-    const card = mark && document.querySelector('#cards .card[data-id="' + mark.dataset.ann + '"]');
+    const card = mark && document.querySelector('.card[data-id="' + mark.dataset.ann + '"]');
     return {
       markInDoc: !!mark,
       noConnector: !!mark && !document.querySelector('#lines path[data-ann="' + mark.dataset.ann + '"]'),

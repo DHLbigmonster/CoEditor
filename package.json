@@ -1,13 +1,14 @@
 {
   "name": "coeditor",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "\u672c\u5730\u6587\u6863\u9605\u8bfb\u3001\u7f16\u8f91\u4e0e\u6279\u6ce8\u5c42\uff1a\u6279\u6b21\u7f16\u53f7\u3001\u5185\u5bb9\u4fdd\u7559\u548c Agent \u4fee\u6539\u7ea6\u675f",
   "type": "module",
   "bin": {
     "coeditor": "./cli.mjs"
   },
   "scripts": {
-    "start": "node cli.mjs open ./sample"
+    "start": "node cli.mjs open ./sample",
+    "test": "node --test tools/test-review.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -17,6 +18,7 @@
     "cli.mjs",
     "server.mjs",
     "mcp-stdio.mjs",
+    "lib/",
     "public/",
     "README.md",
     "LICENSE"

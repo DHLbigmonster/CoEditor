@@ -9,6 +9,30 @@ const state = { path: null, text: "", mtime: 0, annotations: [], selected: null,
   arrows: [], notes: [], images: [], drafts: [], canvasTool: "select", arrowColor: "red", canvasSelected: null,
   vaultRoot: "", workspaceMode: "read" };
 
+function syncStatus(text, bad = false) {
+ const el = $('sync-status'); if (!el) return;
+ el.textContent = text; el.dataset.error = String(bad);
+}
+async function checkedFetch(url, options) {
+ const writing = options && options.method && options.method !== 'GET';
+ if (writing) syncStatus('正在保存…');
+ try {
+  const response = await fetch(url, options);
+  if (!response.ok) { const data = await response.clone().json().catch(() => ({})); throw new Error(data.error || 'HTTP ' + response.status); }
+  if (writing) syncStatus('已保存到本地'); return response;
+ } catch (error) { syncStatus('未保存 · 请重试', true); throw error; }
+}
+window.addEventListener('unhandledrejection', event => { syncStatus('操作未完成 · 请重试', true); toast('操作未完成：' + String(event.reason?.message || event.reason)); });
+function hasDraft() { return editSession && editSession.cm.getValue() !== editSession.originalText; }
+function canLeaveEditor() { return !hasDraft() || window.confirm('当前文字还没有保存。确定放弃这些修改吗？'); }
+window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preventDefault(); event.returnValue = ''; } });
+function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
+let feedbackFilter = 'pending';
+function feedbackTabs() {
+ const labels = { pending: '待处理', retained: '保留', history: '历史' };
+ return '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">' + Object.entries(labels).map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + state.annotations.filter(a => feedbackGroup(a) === key).length + '</b></button>').join('') + '</div>';
+}
+document.addEventListener('click', event => { const button = event.target.closest('[data-feedback]'); if (!button) return; feedbackFilter = button.dataset.feedback; renderCards(); renderDrawer(); drawLines(); });
 function isCanvasMode() { return state.workspaceMode === "canvas"; }
 function isEditableDocument() {
   return state.mode === "text" && /\.(md|markdown|txt|html?|json|csv)$/i.test(state.path || "");
@@ -379,13 +403,14 @@ async function anchorAll() {
     annotation.__drifted = Boolean(hit && hit.drifted);
     if (!hit) {
       if (annotation.status === "active") {
-        annotation.status = "stale";
-        annotation.weight = Math.max(0.2, Number(annotation.weight ?? 1) * 0.5);
-        await patch(annotation.id, { status: annotation.status, weight: annotation.weight, event: "anchor_lost" });
-        decayed += 1;
+        if (annotation.anchorStatus !== 'missing') {
+          annotation.anchorStatus = 'missing';
+          await patch(annotation.id, { anchorStatus: 'missing', event: 'anchor_lost' }); decayed += 1;
+        }
       }
       continue;
     }
+    if (annotation.anchorStatus === 'missing') { annotation.anchorStatus = 'located'; await patch(annotation.id, { anchorStatus: 'located', event: 'anchor_relocated' }); }
     wrapRange(index.map, hit.start, hit.end, annotation.id);
   }
   root.querySelectorAll(".anchor").forEach((node) => {
@@ -448,9 +473,10 @@ function cardElement(annotation) {
   card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); clearPeek(); });
 
   card.addEventListener("mousedown", (event) => {
-    if (event.target.tagName === "BUTTON") return;
+    if (event.target.closest("button, textarea")) return;
     event.stopPropagation();
     selectCard(annotation.id);
+    if (!isCanvasMode()) return;
     const startX = event.clientX;
     const startY = event.clientY;
     const originX = parseFloat(card.style.left);
@@ -507,7 +533,7 @@ function cardElement(annotation) {
       if (act === "edit") { startCardEdit(card, annotation); return; }
       if (act === "save-edit") {
         const ta = card.querySelector(".card-edit");
-        await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+        await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ id: annotation.id, body: ta.value, event: "edited" }),
@@ -518,7 +544,7 @@ function cardElement(annotation) {
       }
       if (act === "cancel-edit") { await loadAnnotations(); return; }
       if (act === "delete") {
-        await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+        await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
           method: "DELETE",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ id: annotation.id }),
@@ -539,6 +565,8 @@ function cardElement(annotation) {
 
 function selectCard(id) {
   state.selected = id;
+  const selected = state.annotations.find(a => a.id === id);
+  if (selected && feedbackGroup(selected) !== feedbackFilter) { feedbackFilter = feedbackGroup(selected); renderCards(); }
   document.querySelectorAll(".card").forEach((node) => node.classList.toggle("selected", node.dataset.id === id));
   drawLines();
   reportUiState();
@@ -547,7 +575,10 @@ function selectCard(id) {
 function renderCards() {
   const host = $("cards");
   host.innerHTML = "";
-  for (const annotation of state.annotations) host.appendChild(cardElement(annotation));
+  if (!isCanvasMode()) host.innerHTML = '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
+  const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
+  for (const annotation of visible) host.appendChild(cardElement(annotation));
+  if (!visible.length && !isCanvasMode()) host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">' + (feedbackFilter === 'pending' ? '没有待处理的反馈。选中文字，写下想改的地方。' : feedbackFilter === 'retained' ? '选中文字并点「保留」，留下后续修改不能动的内容。' : '处理过的反馈会留在这里，随时可以追溯。') + '</p>');
   const active = state.annotations.filter((item) => item.status === "active").length;
   $("stat-count").textContent = state.annotations.length;
   $("stat-active").textContent = active;
@@ -1542,7 +1573,7 @@ function freeSpotNear(worldY) {
 
 /* ---------------- 数据 ---------------- */
 async function patch(id, payload) {
-  await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+  await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ id, ...payload }),
@@ -1613,7 +1644,7 @@ async function renderDocument() {
           <li><b>直接对 Agent 说「按批注改这个 PPT」</b>：Agent 读取约束后用脚本改 .pptx（改文字、删页、换图），新版本放在原文件旁边，绝不覆盖原件。</li>
           <li>让 Agent 把改后关键页导出 PNG 放上画布，与原图并排验收。</li>
         </ol>
-        <p class="pg-note">不内嵌 PPT 编辑器是刻意取舍：内嵌渲染要引入重量级依赖，且重排版式几乎必然跑版。文字级小修改交给 Agent 更可靠。</p>
+        <p class="pg-note">当前版本尚未实现 PPTX 预览或手动编辑。以上是图片批注的替代流程，不等于直接编辑 PPT；外部 Agent 的转换和修改结果需要你逐页核对。</p>
       </div>`;
     state.text = "";
     return;
@@ -1666,11 +1697,12 @@ async function renderDocument() {
 async function loadAnnotations() {
   if (!state.path) return;
   const [res, roundRes] = await Promise.all([
-    fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`),
-    fetch("/api/rounds"),
+    checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`),
+    checkedFetch(`/api/rounds?p=${encodeURIComponent(state.path)}`),
   ]);
   const data = await res.json();
   state.annotations = data.annotations || [];
+  state.revision = data.revision || 0;
   if (roundRes.ok) state.round = (await roundRes.json()).activeRound ?? 0;
   await renderDocument();
   const decayed = state.mode === "image" ? 0 : await anchorAll();
@@ -1690,11 +1722,14 @@ async function loadAnnotations() {
   renderImages();
   renderDrafts();
   reportUiState();
-  if (decayed > 0) toast(`${decayed} 条批注因原文变更已自动降权`);
+  if (!$('drawer').hidden) renderDrawer();
+  if (decayed > 0) toast(decayed + ' 条反馈暂时找不到原文，要求已保留，请检查定位');
 }
 
 async function openDoc(path, { push = true } = {}) {
+  if (!canLeaveEditor()) return;
   if (editSession) leaveEditUi();
+  feedbackFilter = 'pending';
   state.path = path;
   state.mode = kindOf(path);
   if (state.workspaceMode === "edit") state.workspaceMode = "read";
@@ -1770,9 +1805,12 @@ async function loadTree() {
         <div class="tree-children">${render(node.children || [], depth + 1)}</div>
       </div>`;
     }
-    return `<button class="tree-row file" type="button" data-path="${escapeAttr(node.path)}" title="${escapeAttr(node.path)}" style="--depth:${depth}"><i style="background:${dot[node.kind] || dot.text}"></i><span class="tree-name">${escapeHtml(node.name)}</span></button>`;
+    const extension = node.name.match(/\.[^.]+$/)?.[0] || '';
+    const stem = extension ? node.name.slice(0, -extension.length) : node.name;
+    return `<button class="tree-row file" type="button" data-path="${escapeAttr(node.path)}" title="${escapeAttr(node.path)}" style="--depth:${depth}"><i style="background:${dot[node.kind] || dot.text}"></i><span class="tree-name">${escapeHtml(stem)}</span><span class="tree-ext">${escapeHtml(extension)}</span></button>`;
   }).join("");
-  $("tree").innerHTML = render(data.tree, 0);
+  $('tree').innerHTML = render(data.tree, 0);
+  filterFiles();
   const saveExpanded = () => {
     const dirs = [...$("tree").querySelectorAll(".tree-node.expanded")].map((node) => node.dataset.dir);
     localStorage.setItem(storageKey, JSON.stringify(dirs));
@@ -1803,6 +1841,16 @@ async function loadTree() {
   }
 }
 
+function filterFiles() {
+ const query = ($('file-search').value || '').trim().toLocaleLowerCase();
+ for (const file of $('tree').querySelectorAll('.file')) file.hidden = Boolean(query) && !file.dataset.path.toLocaleLowerCase().includes(query);
+ for (const dir of [...$('tree').querySelectorAll('.tree-node')].reverse()) {
+  dir.hidden = Boolean(query) && ![...dir.querySelectorAll('.file')].some(f => !f.hidden);
+  dir.classList.toggle('search-open', Boolean(query));
+ }
+}
+$('file-search').addEventListener('input', filterFiles);
+$('btn-recent').addEventListener('click', async () => { $('fs-modal').hidden = false; await fsLoadRecent(); await fsLoad(state.vaultRoot); });
 /* ---------------- 选区批注 ---------------- */
 let pending = null;
 
@@ -2003,7 +2051,7 @@ $("sel-menu").addEventListener("click", async (event) => {
   if (action === "comment") { openComposer(); return; }
   const kind = action === "highlight" ? "highlight" : "strike";
   const y = freeSpotNear(pending.worldY);
-  await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+  await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -2043,7 +2091,7 @@ async function saveAnnotation() {
   const body = $("composer-input").value.trim();
   if (!body) return;
   const y = freeSpotNear(pending.worldY);
-  await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+  await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -2196,7 +2244,12 @@ async function setWorkspaceMode(mode) {
     return;
   }
   if (mode === state.workspaceMode && (mode !== "edit" || editSession)) return;
-  if (editSession && mode !== "edit") leaveEditUi();
+  if (editSession && mode !== 'edit') {
+    if (!canLeaveEditor()) return;
+    leaveEditUi();
+    const data = await (await checkedFetch('/api/doc?p=' + encodeURIComponent(state.path))).json();
+    state.text = data.text; state.mtime = data.mtime;
+  }
   state.workspaceMode = mode;
   if (mode !== "canvas") setTool("select");
   syncWorkspaceModeUi();
@@ -2277,7 +2330,8 @@ function enterEditMode() {
       previewTimer = setTimeout(renderPreview, 500);
     });
   }
-  editSession = { cm, baseMtime: state.mtime };
+  editSession = { cm, baseMtime: state.mtime, originalText: state.text };
+  cm.on('change', () => syncStatus(hasDraft() ? '文字未保存 · ⌘S 保存' : '已保存到本地'));
 }
 
 async function saveEdit() {
@@ -2289,14 +2343,15 @@ async function saveEdit() {
   });
   if (res.status === 409) {
     toast("文件已被外部修改，请「返回阅读」后重新进入编辑");
-    const fresh = await (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json();
-    editSession.baseMtime = fresh.mtime;
+    syncStatus('保存冲突 · 草稿仍保留', true);
+    // Do not adopt the external mtime without loading/merging its new source.
     return;
   }
   if (!res.ok) { toast("保存失败： " + (await res.json().catch(() => ({}))).error); return; }
   const data = await res.json();
   state.mtime = data.mtime;
   state.text = editSession.cm.getValue(); // 同步内存文本，loadAnnotations 重渲染才用新内容
+  syncStatus("已保存到本地");
   toast("已保存，批注正在重新锚定");
   leaveEditUi();
   state.workspaceMode = "read";
@@ -2526,7 +2581,7 @@ function constraintsText() {
 function renderDrawer() {
   const round = state.round ?? 0;
   const roundOf = (item) => Number.isFinite(item.round) ? item.round : 0;
-  const all = state.annotations.slice().sort((a, b) => roundOf(b) - roundOf(a) || (b.weight - a.weight));
+  const all = state.annotations.filter(a => feedbackGroup(a) === feedbackFilter).sort((a, b) => roundOf(b) - roundOf(a) || (b.weight - a.weight));
   const groups = new Map();
   for (const item of all) {
     const r = roundOf(item);
@@ -2548,7 +2603,7 @@ function renderDrawer() {
         <button data-d-act="delete" class="danger">${item.kind === "highlight" ? "取消保留" : "删除"}</button>
       </div>
     </div>`;
-  let html = "";
+  let html = feedbackTabs();
   for (const [r, items] of groups) {
     html += `<div class="d-round">${r === round ? `第 ${r} 批次 · 进行中` : `第 ${r} 批次 · 历史`}</div>`;
     html += items.map(itemHtml).join("");
@@ -2569,7 +2624,7 @@ $("drawer-body").addEventListener("click", async (event) => {
   const item = state.annotations.find((entry) => entry.id === row.dataset.id);
   if (!item) return;
   if (button.dataset.dAct === "delete") {
-    const res = await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+    const res = await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
       method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id }),
     });
     if (!res.ok) return toast("删除失败，批注未改变");
@@ -2619,7 +2674,7 @@ function toast(message) {
 
 /* ---------------- 批次：只有人明确点击才推进，文件 mtime 变化不替人做产品判断 ---------------- */
 $("btn-round").addEventListener("click", async () => {
-  const res = await fetch("/api/rounds", {
+  const res = await fetch(`/api/rounds?p=${encodeURIComponent(state.path)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "save" }),
@@ -2647,6 +2702,20 @@ async function placeBoard(event) {
 /* ---------------- 左栏：像 VSCode 一样打开本地文件夹（可视化目录选择器） ---------------- */
 const fsState = { cur: "", up: null };
 
+async function fsLoadRecent() {
+  const wrap = $("fs-recent-wrap");
+  const host = $("fs-recent");
+  const res = await fetch("/api/recent-vaults").catch(() => null);
+  const data = res && res.ok ? await res.json() : null;
+  const list = (data && data.vaults) || [];
+  wrap.hidden = list.length === 0;
+  host.innerHTML = list.map((entry) => {
+    const name = entry.path.split("/").filter(Boolean).pop() || entry.path;
+    const home = entry.path.startsWith("/Users/") || entry.path.startsWith("/home/") ? entry.path.replace(/^\/(Users|home)\/[^/]+/, "~") : entry.path;
+    return `<button class="fs-recent-item${entry.current ? " cur" : ""}" data-fs-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${escapeHtml(name)}<em>${escapeHtml(home)}</em>${entry.current ? '<i class="fs-dot" title="当前"></i>' : ""}</button>`;
+  }).join("");
+}
+
 async function fsLoad(dir) {
   const res = await fetch(`/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
   if (!res.ok) { toast("无法访问该目录"); return; }
@@ -2664,6 +2733,7 @@ async function fsLoad(dir) {
 }
 
 async function switchVault(path) {
+  if (!canLeaveEditor()) return false;
   const res = await fetch("/api/vault", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2694,6 +2764,7 @@ $("btn-vault").addEventListener("click", async () => {
     if (data.error === "cancelled") return;
     // 非 macOS 或系统选择器不可用时保留网页目录浏览作为兜底。
     $("fs-modal").hidden = false;
+    await fsLoadRecent();
     await fsLoad("");
   } finally {
     button.disabled = false;
@@ -2711,6 +2782,14 @@ $("fs-quick").addEventListener("click", (event) => {
 $("fs-list").addEventListener("click", (event) => {
   const target = event.target.closest("[data-fs-path]");
   if (target) fsLoad(target.dataset.fsPath);
+});
+// 最近打开：直接切换 vault（不再进目录浏览），与快速跳转分开
+$("fs-recent").addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-fs-path]");
+  if (!target) return;
+  if (target.classList.contains("cur")) { $("fs-modal").hidden = true; return; } // 已是当前目录
+  await switchVault(target.dataset.fsPath);
+  await fsLoadRecent();
 });
 $("fs-up").addEventListener("click", () => { if (fsState.up) fsLoad(fsState.up); });
 $("fs-open").addEventListener("click", async () => {
@@ -2773,30 +2852,34 @@ async function resetDocView() {
   hideSelMenu();
 }
 
+let polling = false;
 setInterval(async () => {
-  if (!state.path) return;
-  try {
-    const vaultRes = await fetch("/api/vault");
-    if (vaultRes.ok) {
-      const vault = await vaultRes.json();
-      if (vault.root && state.vaultRoot && vault.root !== state.vaultRoot) {
-        state.vaultRoot = vault.root;
-        await resetDocView();
-        await loadTree();
-        toast("目录已在别处切换，请重新选择文档");
-        return;
-      }
-    }
-  } catch { /* vault 查询失败不阻塞 mtime 轮询 */ }
-  const res = await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`);
-  if (!res.ok) return;
-  const data = await res.json();
-  if (data.mtime === state.mtime) return;
-  state.text = data.text;
-  state.mtime = data.mtime;
-  toast("检测到文件已更新：批注正在重新锚定，本轮编号保持不变");
-  await loadAnnotations();
-}, 4000);
+ if (!state.path || polling) return;
+ polling = true;
+ try {
+  const path = state.path;
+  const info = await (await checkedFetch('/api/sync?p=' + encodeURIComponent(path))).json();
+  if (path !== state.path) return;
+  if (info.root !== state.vaultRoot) {
+   if (editSession) { syncStatus('目录已切换 · 请先复制保存当前草稿', true); return; }
+   await resetDocView(); await loadTree(); toast('目录已在别处切换，请重新选择文档'); return;
+  }
+  if (editSession || !$('html-edit').hidden || document.querySelector('.card-edit, .d-edit')) {
+   if (info.mtime !== state.mtime) syncStatus('文件在外部更新 · 当前草稿未被覆盖', true);
+   return;
+  }
+  const changed = info.mtime !== state.mtime;
+  if (changed) {
+   const data = await (await checkedFetch('/api/doc?p=' + encodeURIComponent(path))).json();
+   if (path !== state.path) return;
+   state.text = data.text; state.mtime = data.mtime;
+  }
+  if (changed || info.revision !== state.revision) {
+   await loadCanvas(); await loadAnnotations(); syncStatus('已同步 · 本地保存');
+  }
+ } catch (error) { syncStatus('连接中断 · 请检查本地服务', true); }
+ finally { polling = false; }
+}, 2000);
 
 window.addEventListener("resize", applyTransform);
 window.addEventListener("popstate", (event) => {

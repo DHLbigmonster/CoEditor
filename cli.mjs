@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readStore, writeStore, acquireStoreLock } from './lib/store.mjs';
+import { reviewSnapshot, resolveReviewed } from './lib/review.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const [command, ...rest] = process.argv.slice(2);
@@ -12,6 +14,8 @@ const help = `CoEditor CLI
   open <folder> [--port 4400]      启动本地批注层网页服务
   constraints <folder> <doc>       输出该文档当前使用的约束批注（给 Agent 用）
   constraints --json <folder> <doc> 以 JSON 输出
+  review <folder> <doc>            读取待处理、保留、历史及批注 version
+  resolve <folder> <doc> <no>@<version>...  只归档已处理且版本未变化的批注
   conflicts <folder> <doc>         列出尚未裁定的冲突批注
   canvas <folder> <doc>            导出 Obsidian JSON Canvas（<doc>.canvas，含批注卡与连线）
   mcp <folder>                     以 stdio 启动 MCP server（供 claude mcp add 使用）
@@ -43,8 +47,9 @@ async function readDoc(folder, doc) {
       usedByRound.get(round).add(seq); item.no = `${round}-${seq}`;
     }
     return list;
-  } catch {
-    return [];
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw new Error('sidecar-unreadable: ' + error.message);
   }
 }
 
@@ -187,6 +192,26 @@ if (command === "open") {
     stdio: "inherit",
     env: { ...process.env, COEDITOR_PORT: port },
   });
+} else if (command === 'review' || command === 'resolve') {
+  const [folder, doc, ...items] = rest;
+  if (!folder || !doc) throw new Error('需要指定 folder 和 doc');
+  const file = join(resolve(folder), '.marginalia', 'annotations.json');
+  const unlock = await acquireStoreLock(file);
+  try {
+    const data = await readStore(file);
+    if (command === 'review') console.log(JSON.stringify(reviewSnapshot(data, doc), null, 2));
+    else {
+      const ids = [], versions = {};
+      for (const spec of items) {
+        const match = /^(.*)@(\d+)$/.exec(spec);
+        if (!match) throw new Error('请使用 review 读取时的 编号@版本，例如 0-1@1');
+        ids.push(match[1]); versions[match[1]] = Number(match[2]);
+      }
+      const result = resolveReviewed(data, { doc, ids, versions, note: 'Completed via CLI' });
+      if (result.resolved.length) await writeStore(file, data);
+      console.log(JSON.stringify(result, null, 2));
+    }
+  } finally { await unlock(); }
 } else if (command === "constraints") {
   const flags = { json: rest.includes("--json") };
   const args = rest.filter((item) => item !== "--json");

@@ -4,6 +4,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
+import { acquireStoreLock, readStore, writeStore } from './lib/store.mjs';
+import { reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
 const ROOT = resolve(process.argv[2] || process.cwd());
 const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 const TEXT_EXT = new Set([".md", ".markdown", ".txt", ".html", ".htm", ".json", ".csv"]);
@@ -28,30 +30,10 @@ async function listTree(dir = ROOT, base = ROOT) {
   return out.sort();
 }
 
-async function loadAnnotations(doc) {
-  try {
-    const data = JSON.parse(await readFile(SIDECAR, "utf8"));
-    const list = data.docs[doc] || [];
-    const used = new Map();
-    for (const item of list) {
-      const round = Number.isFinite(item.round) ? item.round : 0;
-      if (!used.has(round)) used.set(round, new Set());
-      const match = typeof item.no === "string" ? /^(\d+)-(\d+)$/.exec(item.no) : null;
-      if (match && Number(match[1]) === round) used.get(round).add(Number(match[2]));
-    }
-    for (const item of list) {
-      const round = Number.isFinite(item.round) ? item.round : 0;
-      if (typeof item.no === "string" && new RegExp(`^${round}-\\d+$`).test(item.no)) continue;
-      let seq = 1; while (used.get(round).has(seq)) seq += 1;
-      used.get(round).add(seq); item.no = `${round}-${seq}`;
-    }
-    return list;
-  } catch {
-    return [];
-  }
-}
+async function loadAnnotations(doc) { return (await readStore(SIDECAR)).docs[doc] || []; }
 
 const TOOLS = [
+ { name: 'get_review', description: '修改前读取待处理反馈、持续保留要求、待确认锚点与历史。保存返回的 version；完成后 resolve_annotations 携带这些版本。', inputSchema: { type: 'object', properties: { doc: { type: 'string' } }, required: ['doc'] } },
   {
     name: "list_documents",
     description: "列出 CoEditor 库中所有可批注的文档（相对路径）",
@@ -94,9 +76,10 @@ const TOOLS = [
       properties: {
         doc: { type: "string", description: "文档相对路径" },
         ids: { type: "array", items: { type: "string" }, description: "批注显示编号（如 0-1、0-2）或内部 ID" },
-        note: { type: "string", description: "可选：一句话说明处理方式，记入批注历史" },
+        note: { type: "string", description: "一句话说明实际处理方式，记入批注历史" },
+        versions: { type: "object", additionalProperties: { type: "number" }, description: "读取时的版本，键为 ids 中的编号。版本变化拒绝归档，防止覆盖人刚加的要求。" },
       },
-      required: ["doc", "ids"],
+      required: ["doc", "ids", "versions"],
     },
   },
   {
@@ -189,57 +172,20 @@ function brief(item) {
     no: item.no || null,
     status: item.status,
     weight: item.weight,
+    version: annotationVersion(item),
     kind: item.kind || "text",
     kindLabel: item.kind === "highlight" ? "保留" : item.kind === "strike" ? "删除线" : item.kind === "region" ? "区域" : null,
     region: item.region || null,
     image: item.image || null,
     quote: item.quote,
-    requirement: item.body,
+    requirement: item.kind === 'highlight' ? '保留原文，不删除、不改写；仅用户取消后解除。' : item.body,
     conflicts_with: item.conflicts_with || [],
     supersedes: item.supersedes || [],
   };
 }
 
-/* MCP 侧 sidecar 读写（与 server 并发窗口极小，tmp+rename 原子写） */
-async function loadSidecar() {
-  try {
-    const data = JSON.parse(await readFile(SIDECAR, "utf8"));
-    for (const key of ["arrows", "notes", "images", "drafts"]) {
-      if (!Array.isArray(data[key])) data[key] = [];
-    }
-    return data;
-  } catch (err) {
-    // ENOENT = 首次使用给空结构；文件存在但读不了 = 拒绝服务（防止空壳覆盖真实数据）
-    if (err && err.code === "ENOENT") return { version: 1, docs: {}, arrows: [], notes: [], images: [], drafts: [] };
-    throw new Error(`sidecar-unreadable: ${String(err && err.message || err)}`);
-  }
-}
-
-async function saveSidecar(data) {
-  const { writeFile, mkdir, rename, readFile } = await import("node:fs/promises");
-  /* 防破坏守卫（与 server 同款）：任何集合数量无故减少即拒绝写盘。
-     磁盘存在但读不了时同样拒绝写——宁可失败，绝不拿空/半读数据覆盖事实源 */
-  try {
-    const current = JSON.parse(await readFile(SIDECAR, "utf8"));
-    for (const key of ["arrows", "notes", "images", "drafts"]) {
-      const before = Array.isArray(current[key]) ? current[key].length : 0;
-      const after = Array.isArray(data[key]) ? data[key].length : 0;
-      if (before > after) throw new Error(`blocked-destructive-canvas-loss: ${key} ${before} -> ${after}`);
-    }
-    const beforeDocs = Object.values(current.docs || {}).reduce((acc, l) => acc + (Array.isArray(l) ? l.length : 0), 0);
-    const afterDocs = Object.values(data.docs || {}).reduce((acc, l) => acc + (Array.isArray(l) ? l.length : 0), 0);
-    if (beforeDocs > afterDocs) throw new Error(`blocked-destructive-annotation-loss: ${beforeDocs} -> ${afterDocs}`);
-  } catch (error) {
-    if (String(error).startsWith("Error: blocked-destructive")) throw error;
-    if (error && error.code !== "ENOENT") throw new Error(`sidecar-unreadable-refusing-write: ${String(error)}`);
-    /* 磁盘无文件：首次写盘，放行 */
-  }
-  await mkdir(dirname(SIDECAR), { recursive: true });
-  // 随机 tmp 后缀：并发请求同进程写盘时避免 rename 竞态
-  const tmp = `${SIDECAR}.mcp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
-  await rename(tmp, SIDECAR);
-}
+const loadSidecar = () => readStore(SIDECAR);
+const saveSidecar = data => writeStore(SIDECAR, data);
 
 function nextSeqIn(list, prefix) {
   const max = list.reduce((acc, item) => {
@@ -265,6 +211,7 @@ function rewriteDraftAssets(html, draftDir) {
 
 async function callTool(name, args = {}) {
   switch (name) {
+    case 'get_review': return reviewSnapshot(await loadSidecar(), args.doc);
     case "list_documents":
       return { documents: await listTree() };
     case "read_document": {
@@ -298,7 +245,7 @@ async function callTool(name, args = {}) {
       return {
         doc: args.doc,
         count: list.length + canvas.arrows.length,
-        rule: "以下为人类留下的当前约束（status=active = 人新增、待处理），修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。全部处理完成后调用 resolve_annotations 逐条标记，网页会自动将其灰显归档，无需人再操作。",
+        rule: "以下为人类留下的当前约束（status=active = 人新增、待处理），修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。处理完成后调用 resolve_annotations 并传入读取时的 versions。保留条目不属于待办，不能被归档；只标记已完成的普通批注。",
         constraints: list.map((item) => {
           const briefItem = brief(item);
           briefItem.conflicts_with = item.live_conflicts || [];
@@ -328,32 +275,9 @@ async function callTool(name, args = {}) {
       return item;
     }
     case "resolve_annotations": {
-      const data = await loadSidecar();
-      const list = data.docs[args.doc] || [];
-      const wanted = (Array.isArray(args.ids) ? args.ids : [args.ids]).map((v) => String(v || "").trim()).filter(Boolean);
-      const resolved = [];
-      const skipped = [];
-      for (const key of wanted) {
-        const item = list.find((entry) => entry.id === key || entry.no === key);
-        if (!item) { skipped.push({ id: key, reason: "not-found" }); continue; }
-        if (item.status !== "active") { skipped.push({ id: key, reason: `already-${item.status}` }); continue; }
-        item.status = "addressed";
-        item.weight = Math.min(Number(item.weight ?? 1), 0.5);
-        item.history = item.history || [];
-        item.history.push({
-          event: "resolved_by_agent",
-          note: typeof args.note === "string" ? args.note.slice(0, 200) : "",
-          at: new Date().toISOString(),
-        });
-        resolved.push(item.no || item.id);
-      }
-      if (resolved.length) await saveSidecar(data);
-      return {
-        doc: args.doc,
-        resolved,
-        skipped,
-        note: "已处理的批注在网页中自动灰显归档、退出约束清单；未在被标记之列的仍是 active。人无需再点任何按钮。",
-      };
+      const data = await loadSidecar(); const result = resolveReviewed(data, args);
+      if (result.resolved.length) await saveSidecar(data);
+      return result;
     }
     case "insert_asset": {
       const { writeFile, mkdir } = await import("node:fs/promises");
@@ -511,7 +435,9 @@ async function handleRequest(message) {
       return { tools: TOOLS };
     }
     if (message.method === "tools/call") {
-      const result = await callTool(message.params.name, message.params.arguments || {});
+      const unlock = await acquireStoreLock(SIDECAR); let result;
+      try { result = await callTool(message.params.name, message.params.arguments || {}); }
+      finally { await unlock(); }
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
     if (message.method === "ping") return {};

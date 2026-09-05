@@ -38,7 +38,8 @@ const mcpResult = await new Promise((resolve) => {
     const line = out.split("\n").map((l) => l.trim()).filter(Boolean).pop();
     try { resolve(JSON.parse(line).result); } catch { resolve(null); }
   });
-  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "resolve_annotations", arguments: { doc: DOC, ids: [annNo], note: "电池验证" } } })}\n`);
+  const version = constraintsBefore.json.constraints.find(a => a.no === annNo)?.version || 1;
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "resolve_annotations", arguments: { doc: DOC, ids: [annNo], versions: { [annNo]: version }, note: "电池验证" } } })}\n`);
   child.stdin.end();
 });
 const constraintsAfter = await api(`/api/constraints?p=${encodeURIComponent(DOC)}`);
@@ -98,8 +99,10 @@ const h1Point = await evaluate(`(() => {
 if (h1Point) await click(h1Point.x, h1Point.y);
 await sleep(400);
 const clickLocated = await evaluate(`(() => {
-  const line = document.querySelector('.CodeMirror-code .CodeMirror-activeline');
-  const text = line ? line.textContent : '';
+  const el = document.querySelector('.edit-split .CodeMirror');
+  const cm = el && el.CodeMirror;
+  if (!cm) return false;
+  const text = cm.getLine(cm.getCursor().line) || '';
   return text.includes('<h1>') && text.includes('误区');
 })()`);
 

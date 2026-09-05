@@ -76,14 +76,33 @@ if (itemPoint) {
 const anchorPoint = await evaluate(`(() => {
   const el = document.querySelector('#doc .anchor[data-ann]');
   if (!el) return null;
-  el.scrollIntoView({ block: 'center' });
+  el.scrollIntoView({ block: 'center', behavior: 'instant' });
   const r = el.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 })()`);
 let docToCard = false; let docToCardCleared = false;
 if (anchorPoint) {
-  await sleep(300);
-  await move(anchorPoint.x, anchorPoint.y);
+  // 锚点对应的批注分在哪个组（待处理/保留/历史），就先切到那个 Tab，否则卡片没渲染、无从点亮
+  await evaluate(`(() => {
+    const el = document.querySelector('#doc .anchor[data-ann]');
+    const item = el && state.annotations.find(a => a.id === el.dataset.ann);
+    const group = item ? feedbackGroup(item) : 'pending';
+    const tab = document.querySelector('[data-feedback="' + group + '"]');
+    if (tab) tab.click();
+    return group;
+  })()`);
+  await sleep(500);
+  await sleep(400);
+  // 滚动落定后重算坐标：滚动中取的 rect 会飘，导致 hover 打空
+  const settled = await evaluate(`(() => {
+    const el = document.querySelector('#doc .anchor[data-ann]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  const target = settled || anchorPoint;
+  await move(target.x - 4, target.y - 4);
+  await move(target.x, target.y);
   await sleep(250);
   docToCard = await evaluate(`document.querySelectorAll('#drawer-body .d-item.coeditor-peek, .card.coeditor-peek').length > 0`);
   await move(20, 860);
