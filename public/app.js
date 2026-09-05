@@ -663,11 +663,16 @@ function renderCards() {
   const activeCount = state.annotations.filter((item) => item.status === "active").length;
   $("stat-count").textContent = state.annotations.length;
   $("stat-active").textContent = activeCount;
+  // PDF/图片没有标题结构：不显示「大纲」入口，避免点进去一片空白
+  const outlineAvailable = state.mode === "text";
+  if (railTab === "outline" && !outlineAvailable) railTab = "feedback";
   if (!isCanvasMode()) {
-    host.innerHTML = '<div class="rail-tabs" role="tablist" aria-label="大纲与反馈">'
-      + '<button role="tab" data-rail-tab="outline"' + (railTab === 'outline' ? ' aria-selected="true"' : '') + '>大纲</button>'
-      + '<button role="tab" data-rail-tab="feedback"' + (railTab === 'feedback' ? ' aria-selected="true"' : '') + '>反馈</button>'
-      + '</div>';
+    host.innerHTML = outlineAvailable
+      ? '<div class="rail-tabs" role="tablist" aria-label="大纲与反馈">'
+        + '<button role="tab" data-rail-tab="outline"' + (railTab === 'outline' ? ' aria-selected="true"' : '') + '>大纲</button>'
+        + '<button role="tab" data-rail-tab="feedback"' + (railTab === 'feedback' ? ' aria-selected="true"' : '') + '>反馈</button>'
+        + '</div>'
+      : '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
     if (railTab === 'outline') { renderOutline(host); return; }
     host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs());
   }
