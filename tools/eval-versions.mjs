@@ -103,6 +103,26 @@ const carry3 = await post(`/api/versions?p=${encodeURIComponent(P("缺失测试.
 const missingAnns = (await getAnnotations(P("缺失测试-v2.md"))).filter(a => a.carriedFrom);
 result.carryMissingFlagged = carry3.json.ok === true && carry3.json.missing.length === 1 && missingAnns.length === 1 && missingAnns[0].anchorStatus === "missing" && (missingAnns[0].body || "").includes("保留内容缺失");
 
+/* ---- A10. diff 汇总：回应了几条反馈 + 保留内容是否完好 ---- */
+const sumDiff = await (await fetch(`${BASE}/api/versions/diff?p=${encodeURIComponent(P("缺失测试.md"))}&file=${encodeURIComponent(P("缺失测试-v2.md"))}`)).json();
+result.diffReport = sumDiff.retained && sumDiff.retained.total === 1 && sumDiff.retained.missing === 1 && typeof sumDiff.responded === "number";
+
+/* ---- A11. 退回版本 → Agent 已处理的批注重新待处理、批次回退 ---- */
+await post(`/api/annotations?p=${encodeURIComponent(P("顺序测试.md"))}`, { kind: "text", quote: "第一段，讲原料", body: "退回测试：这条要改" });
+const annSeq = (await getAnnotations(P("顺序测试.md"))).find(a => a.kind === "text");
+await post(`/api/resolve?p=${encodeURIComponent(P("顺序测试.md"))}`, { ids: [annSeq.no], versions: { [annSeq.no]: annSeq.version } });
+const resolvedNow = (await getAnnotations(P("顺序测试.md"))).find(a => a.id === annSeq.id);
+const roundAfterResolve = (await (await fetch(`${BASE}/api/rounds?p=${encodeURIComponent(P("顺序测试.md"))}`)).json()).activeRound;
+await post(`/api/versions?p=${encodeURIComponent(P("顺序测试.md"))}`, { action: "register", file: P("顺序测试-v2.md"), note: "退回场景" });
+const rejList = await getVersions(P("顺序测试.md"));
+const rejEntry = rejList.find(v => v.file === P("顺序测试-v2.md"));
+const rej = await post(`/api/versions?p=${encodeURIComponent(P("顺序测试.md"))}`, { action: "decide", id: rejEntry.id, status: "rejected" });
+const reopenedAnn = (await getAnnotations(P("顺序测试.md"))).find(a => a.id === annSeq.id);
+const roundAfterReject = (await (await fetch(`${BASE}/api/rounds?p=${encodeURIComponent(P("顺序测试.md"))}`)).json()).activeRound;
+result.rejectedReopens = rej.json.ok === true && Array.isArray(rej.json.reopened) && rej.json.reopened.includes(annSeq.no)
+  && resolvedNow.status === "addressed" && reopenedAnn.status === "active"
+  && roundAfterReject === Math.max(0, (Number(roundAfterResolve) || 0) - 1);
+
 /* ---- B. UI：面板 / 未变化措辞 / 漂移黄条 / 验收落在本尊 / 真实跳转且保留已继承 ----
    UI 层用干净的「验收错位测试」文档，完整复现报告场景：
    用户看到 v2 → Agent 又登记新版本（列表移位）→ 用户点验收 → 被验收的必须是用户看到的那个 */
@@ -140,14 +160,21 @@ await sleep(2400);
 await evalv(openVersionsTab);
 await sleep(1200);
 result.panelShown = await evalv(`!!document.querySelector("#cards .version-panel .vp-list")`);
+// 愿景图头部：回应汇总 + 保留状态（该文档 1 条保留且原文在新稿中 → 未改动）
+result.reportShown = await evalv(`(() => {
+  const r = document.querySelector("#cards .vp-report");
+  return r ? r.textContent.includes("1 处保留内容未改动") : false;
+})()`);
+// 并排双栏（默认视图）：左右两列 + 未变化折叠可展开
 result.unchangedWording = await evalv(`(() => {
   const s = document.querySelector("#cards .vp-summary");
   return s ? (s.textContent.includes("未变化") && !s.textContent.includes("保留 ")) : false;
-})()`) && await evalv(`(() => {
-  const d = document.querySelector("#cards .vp-unchanged");
-  if (!d) return false;
-  d.open = true;
-  return d.querySelectorAll(".vp-row.same").length > 0;
+})()`) && await evalv(`(async () => {
+  const gap = document.querySelector("#cards .sb-gap");
+  if (!gap) return !!document.querySelector("#cards .sb-row.same");
+  gap.click();
+  await new Promise(r => setTimeout(r, 200));
+  return document.querySelectorAll("#cards .sb-row.same").length > 0;
 })()`);
 
 // B1. 漂移黄条：登记后文件被改 → 对照顶部必须明示「与登记时不一致」（读改写 = 重跑也真漂移）

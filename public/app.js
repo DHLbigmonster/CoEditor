@@ -29,7 +29,7 @@ window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preve
 function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
 let feedbackFilter = 'pending';
 /* 版本对照状态（feedbackTabs 与渲染共用；选中记 id 不记序号——序号会随新增版本移位） */
-let versionState = { list: [], activeId: null, diff: null, diffChanged: null, loading: false };
+let versionState = { list: [], activeId: null, diff: null, diffChanged: null, loading: false, view: 'side', report: null };
 
 function feedbackTabs() {
  const labels = { pending: '待处理', retained: '保留', history: '历史', versions: '版本对照' };
@@ -619,6 +619,14 @@ function paintVersions(shell) {
   versionState.activeId = active.id;
   const statusText = { pending: '待验收', accepted: '已验收', rejected: '已退回' };
   shell.innerHTML = `
+    <div class="vp-headline">
+      <span class="vp-title">这一轮，改了哪里？</span>
+      <span class="vp-view-toggle" role="tablist">
+        <button data-vp-view="side"${versionState.view === 'side' ? ' aria-selected="true"' : ''}>并排</button>
+        <button data-vp-view="rows"${versionState.view === 'rows' ? ' aria-selected="true"' : ''}>逐段</button>
+      </span>
+    </div>
+    ${reportHtml(versionState.report)}
     <div class="vp-list" role="list">
       ${list.map(item => `<button role="listitem" class="vp-item${item.id === active.id ? ' active' : ''}" data-vp-id="${escapeHtml(item.id)}">
         <span class="vp-round">第 ${item.round} 轮</span>
@@ -633,6 +641,14 @@ function paintVersions(shell) {
       <button class="vp-accept">验收</button>
       <button class="vp-reject danger">退回</button>
     </div>`;
+  shell.querySelectorAll('[data-vp-view]').forEach((button) => button.addEventListener('click', () => {
+    versionState.view = button.dataset.vpView;
+    paintVersions(shell);
+  }));
+  shell.querySelectorAll('[data-sb-gap]').forEach((button) => button.addEventListener('click', () => {
+    const hidden = shell.querySelector(`[data-sb-hidden="${button.dataset.sbGap}"]`);
+    if (hidden) { hidden.hidden = false; button.remove(); }
+  }));
   shell.querySelectorAll('[data-vp-id]').forEach((button) => button.addEventListener('click', async () => {
     versionState.activeId = button.dataset.vpId;
     versionState.diff = null;
@@ -663,11 +679,50 @@ function paintVersions(shell) {
   if (versionState.diff === null && !versionState.loading) loadDiff(shell);
 }
 
+function reportHtml(report) {
+  if (!report) return '';
+  const parts = [];
+  if (report.responded) parts.push(`回应了 ${report.responded} 条反馈`);
+  if (report.retained) {
+    if (report.retained.total === 0) parts.push('本轮没有生效中的保留要求');
+    else if (report.retained.missing > 0) parts.push(`⚠ ${report.retained.missing}/${report.retained.total} 处保留内容在新稿中未找到，待确认`);
+    else parts.push(`${report.retained.ok} 处保留内容未改动`);
+  }
+  return parts.length ? `<div class="vp-report">${parts.map(escapeHtml).join(' · ')}</div>` : '';
+}
+
+function sideBySideHtml(diff) {
+  const rows = diff.sideBySide || [];
+  // 连续未变化的段落折叠成一行，点开才展开——并排视图也要一眼看到「变化」
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 4) out.push({ type: 'gap', count: run.length, rows: run });
+    else run.forEach(row => out.push(row));
+    run = [];
+  };
+  for (const row of rows) {
+    if (row.type === 'same') run.push(row);
+    else { flush(); out.push(row); }
+  }
+  flush();
+  const cell = (text, kind) => `<div class="sb-cell ${kind}">${text ? escapeHtml(text) : '&nbsp;'}</div>`;
+  return `
+    <div class="sb-head"><span>修改前</span><span>修改后</span></div>
+    <div class="sb-body">${out.map((row, index) => row.type === 'gap'
+      ? `<button class="sb-gap" data-sb-gap="${index}">⋯ 未变化的 ${row.count} 段（点开）</button><div class="sb-hidden" data-sb-hidden="${index}" hidden>${row.rows.map(r => `<div class="sb-row same"><div class="sb-cell">${escapeHtml(r.left)}</div><div class="sb-cell">${escapeHtml(r.right)}</div></div>`).join('')}</div>`
+      : `<div class="sb-row ${row.type}">${cell(row.left, row.type === 'changed' || row.type === 'removed' ? row.type : 'same')}${cell(row.right, row.type === 'changed' ? 'changed' : row.type === 'added' ? 'added' : 'same')}</div>`
+    ).join('')}</div>`;
+}
+
 function diffHtml(diff, active) {
   if (!diff) return `<p class="vp-hint">${escapeHtml(active && active.note ? active.note : '这一轮改了哪里：展开对照查看。')}</p>`;
   if (diff.binary) return '<p class="vp-hint">二进制成品（PDF/DOCX 等）无法逐段对照——请打开新文件人工查看。</p>';
   const { rows, removed, summary } = diff;
-  // 变化全量展示（不截断）；「未变化」折叠可展开，与用户主动设置的「保留要求」用词区分开
+  if (versionState.view === 'side') return `
+    <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>
+    ${sideBySideHtml(diff)}`;
+  // 逐段视图：变化全量展示（不截断）；「未变化」折叠可展开，与「保留要求」用词区分
   return `
     <div class="vp-summary">新增 ${summary.added} 段 · 删除 ${summary.removed} 段 · 未变化 ${summary.unchanged} 段${diff.truncated ? ' · 超长文档仅对照前 2000 段' : ''}</div>
     <div class="vp-rows">
@@ -686,7 +741,8 @@ async function loadDiff(shell) {
     const data = await res.json();
     versionState.diff = data.diff || null;
     versionState.diffChanged = data.changed === true;
-  } catch { versionState.diff = null; versionState.diffChanged = null; }
+    versionState.report = { responded: data.responded || 0, retained: data.retained || null };
+  } catch { versionState.diff = null; versionState.diffChanged = null; versionState.report = null; }
   versionState.loading = false;
   paintVersions(shell);
 }
@@ -703,7 +759,13 @@ async function decideVersion(shell, status) {
     const detail = await res.json().catch(() => ({}));
     toast(detail.error === 'version-content-changed' ? '文件内容与登记时不一致，验收已阻止——请重新对照' : `操作失败：${detail.error || res.status}`);
   } else {
-    toast(status === 'accepted' ? '已验收 · 可继续在新版本上批注' : '已退回 · 让 Agent 再改一版');
+    const data = await res.json().catch(() => ({}));
+    if (status === 'rejected' && Array.isArray(data.reopened) && data.reopened.length) {
+      toast(`已退回 · ${data.reopened.length} 条已处理反馈重新待处理`);
+      await loadAnnotations();
+    } else {
+      toast(status === 'accepted' ? '已验收 · 可继续在新版本上批注' : '已退回 · 让 Agent 再改一版');
+    }
   }
   await renderVersions(shell);
 }
@@ -752,7 +814,7 @@ function drawLines() {
     const card = $("cards").querySelector(`.card[data-id="${annotation.id}"]`);
     const cardX = annotation.x ?? RAIL_X;
     const cardY = (annotation.y ?? 0) + 26;
-    const color = { active: "#e0604f", addressed: "#6fa055", stale: "#c99537", deprecated: "#7d7a75" }[annotation.status] || "#7d7a75";
+    const color = { active: "#262626", addressed: "#10a37f", stale: "#a8842c", deprecated: "#a3a3a3" }[annotation.status] || "#a3a3a3";
     if (!mark) {
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", `M ${pageRect.x + pageRect.w} ${cardY} L ${cardX} ${cardY}`);
@@ -930,7 +992,7 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
     const y = annotation.region.y * canvas.height;
     const w = annotation.region.w * canvas.width;
     const h = annotation.region.h * canvas.height;
-    const color = annotation.status === "active" ? "#e0604f" : "#c99537";
+    const color = annotation.status === "active" ? "#d64545" : "#a8842c";
     context.strokeStyle = color;
     context.lineWidth = Math.max(2, scaleUnit * 0.003);
     context.strokeRect(x, y, w, h);
@@ -1059,7 +1121,7 @@ async function askEditWithAnnotations() {
 }
 
 /* ---------------- 手绘标注箭头（Cowart 交互层） ---------------- */
-const ARROW_COLORS = { red: "#e0604f", orange: "#e8842c", yellow: "#d9a514" };
+const ARROW_COLORS = { red: "#d64545", orange: "#b45309", yellow: "#ca8a04" };
 
 function arrowSeed(id) {
   let seed = 0;
@@ -1740,7 +1802,7 @@ async function renderDocument() {
       document.querySelectorAll("#bar-pdf-cols button").forEach((b) => b.classList.toggle("active", Number(b.dataset.cols) === cols));
     } catch (err) {
       $("bar-pdf-cols").hidden = true;
-      host.innerHTML = `<p style="color:#e0604f">PDF 渲染失败：${String(err && err.message || err)}</p>`;
+      host.innerHTML = `<p style="color:#d64545">PDF 渲染失败：${String(err && err.message || err)}</p>`;
     }
     return;
   }
@@ -1755,7 +1817,7 @@ async function renderDocument() {
       host.classList.add("docx-view");
       state.text = host.innerText;
     } catch (err) {
-      host.innerHTML = `<p style="color:#e0604f">Word 解析失败：${String(err && err.message || err)}</p>`;
+      host.innerHTML = `<p style="color:#d64545">Word 解析失败：${String(err && err.message || err)}</p>`;
     }
     return;
   }

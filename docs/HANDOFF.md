@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.0.1 · 2026-09-05
+> 最后更新：v1.1.0 · 2026-09-05
 
 ## 产品一句话
 
@@ -42,6 +42,9 @@
 19. **请求治理**：全局队列排队上限 15s（超时 503，**必须放行后队**否则整条链断流）、body 读取上限 20s、async handler 顶层统一 catch（Node 22 默认 unhandledRejection 即崩进程——新加路由不许绕过 `requestHandler`）。
 20. **保留继承只在服务端**（`POST /api/versions` `action=carry`）：按 `carriedFrom`（来源批注 id）幂等补齐；逐条核对新稿文本，原文找不到 → `anchorStatus=missing` + body 前缀「保留内容缺失，待确认」。**前端不得自己拼 POST 批注做继承**（v0.9.9 的前端实现只在"新版无批注"时执行一次、失败静默——均为缺陷）。
 21. **对照诚实**：textDiff 是顺序敏感 LCS（2000 段上限，超限标 `truncated`）；「未变化」描述对照结果，与用户设置的「保留要求」是两回事，文案不得混用；二进制格式不硬按 UTF-8 对照。
+22. **退回语义**：`decide rejected` = 否决 Agent 的「已处理」声明——`reopenResolvedAnnotations` 把该文档全部 addressed 普通批注改回 active，`docRounds` 回退到登记前一轮；保留（highlight）不受退回影响。新增退回入口必须沿用此语义，不能只改版本状态标签。
+23. **版本对照数据**：diff 响应自带 `responded`（本轮 Agent 处理数）与 `retained {total, ok, missing}`（服务端逐条核对新稿原文）；前端 `sideBySide` 视图是默认形态（相邻删旧×增新配对成左右两列），`rows` 是逐段备选。改 textDiff 输出结构时两个视图都要验证。
+24. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
 
 ## 测试电池（发布门禁）
 

@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 
 import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
-import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf } from './lib/review.mjs';
+import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf, reopenResolvedAnnotations } from './lib/review.mjs';
 import { listVersions, registerVersion, setVersionStatus, textDiff, versionIdOf, prepareVersionRegistration, carryRetainedAnnotations } from './lib/version.mjs';
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 let requestQueue = Promise.resolve();
@@ -255,9 +255,19 @@ const requestHandler = async (req, res) => {
           if (!real) return send(400, JSON.stringify({ error: 'version file missing' }));
           const currentHash = createHash('sha256').update(await readFile(real)).digest('hex');
           try {
-            const entry = setVersionStatus(data, doc, id, body.status === 'rejected' ? 'rejected' : 'accepted', { expectHash: currentHash });
+            const status = body.status === 'rejected' ? 'rejected' : 'accepted';
+            const entry = setVersionStatus(data, doc, id, status, { expectHash: currentHash });
+            // 退回 = 否决 Agent 的「已处理」声明：批注重回待处理，批次也退回登记前的那一轮
+            let reopened = [];
+            if (status === 'rejected') {
+              reopened = reopenResolvedAnnotations(data, doc);
+              if (reopened.length) {
+                data.docRounds ||= {};
+                data.docRounds[doc] = Math.max(0, (Number(entry.round) || 0) - 1);
+              }
+            }
             await writeSidecar(data);
-            return send(200, JSON.stringify({ ok: true, version: entry }));
+            return send(200, JSON.stringify({ ok: true, version: entry, reopened }));
           } catch (error) {
             if (error.code === 'version-content-changed') {
               return send(409, JSON.stringify({ error: 'version-content-changed', detail: '文件内容与登记时不一致，验收已阻止。请重新对照后再决定。' }));
@@ -299,13 +309,23 @@ const requestHandler = async (req, res) => {
         }
         const original = await readFile(originalPath, 'utf8');
         const next = await readFile(versionPath, 'utf8');
+        const data = await readSidecar();
         let changed = null;
         if (versionId) {
-          const data = await readSidecar();
           const entry = listVersions(data, doc).find(item => item.id === versionId);
           if (entry && entry.nextHash) changed = createHash('sha256').update(next).digest('hex') !== entry.nextHash;
         }
-        return send(200, JSON.stringify({ doc, file, changed, diff: textDiff(original, next) }));
+        // 回应汇总：这一轮 Agent 处理了几条反馈、保留要求在新稿里是否还完好
+        const annotations = data.docs[doc] || [];
+        const round = currentRound(data, doc);
+        const responded = annotations.filter(a => a.kind !== 'highlight' && a.status === 'addressed' && (Number.isFinite(a.round) ? a.round : 0) === round).length;
+        const retainedList = annotations.filter(a => a.kind === 'highlight' && a.status === 'active');
+        const retainedOk = retainedList.filter(a => offsetsOf(next, a.quote, a.prefix)).length;
+        return send(200, JSON.stringify({
+          doc, file, changed, diff: textDiff(original, next),
+          responded,
+          retained: { total: retainedList.length, ok: retainedOk, missing: retainedList.length - retainedOk },
+        }));
       } catch (error) {
         return send(400, JSON.stringify({ error: String(error && error.message || error) }));
       }
