@@ -1320,3 +1320,27 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
   width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 9px; background: #fff;
 }
 .sb-render-note { font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; }
+
+/* ---------- v1.4 · 阅读缩放与右栏：文档是主角 ---------- */
+/* 缩放只作用于文档内容：放大超出视口时，滚动条出现在正文区内部，
+   右侧反馈栏 sticky 钉住不被顶走（此前 overflow:hidden 直接把放大的内容裁掉） */
+body[data-workspace-mode="read"] #viewport { overflow: auto; }
+/* 右栏固定为窗口侧栏（像 PDF 阅读器）：横向缩放滚动时永远钉在右缘，不被内容顶走；
+   文档区通过 world 的右内边距给它让位 */
+body[data-workspace-mode="read"]:not(.cards-hidden) #world { padding-right: 340px; }
+body[data-workspace-mode="read"] #cards {
+  position: fixed; left: auto; right: 18px; top: 104px; z-index: 9; /* 必须低于 #bar(z10)：下拉菜单(面板 z80)随 bar 的 stacking context 对外只有 10 */ /* left:auto：覆盖画布规则的 left:0，否则 left 优先把侧栏钉在左上角 */
+  width: 292px;
+  max-height: calc(100vh - 148px); overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .07);
+  border-radius: 12px; padding: 4px 6px 12px;
+}
+/* 右栏折叠：阅读/编辑模式生效；画布的批注卡是世界坐标元素，不受此开关影响 */
+body.cards-hidden:not([data-workspace-mode="canvas"]) #cards { display: none !important; }
+#btn-cards[aria-pressed="true"] { color: var(--ink); background: rgba(0, 0, 0, .06); }
+/* 点击缩放百分比重置 100% 的可点击暗示 */
+body:not([data-workspace-mode="canvas"]) #zoom { cursor: zoom-out; }
+/* HTML 文档按内容原始宽度阅读（简历等固定设计宽不再被 960 容器压窄） */
+body[data-workspace-mode="read"] #page:has(.html-view) { max-width: none; }
+/* 只读格式的编辑入口：明确禁用态，说明放在 title */
+.mode-seg .mode-disabled { opacity: .38; cursor: not-allowed; }

@@ -156,11 +156,37 @@ function clampView() {
   view.panY = Math.min(slack, Math.max(rect.height - contentH * view.zoom - slack, view.panY));
 }
 
+let pdfZoomTimer = null;
+let pdfZoomApplied = 1;
+function schedulePdfZoom() {
+  // PDF 是固定像素内容：缩放要真正改变画布尺寸并产生内部滚动（像浏览器 PDF 查看器），
+  // 而不是被 flex 压回容器宽。防抖重渲染，复用已打开的文档句柄。
+  if (state.mode !== "pdf" || state.workspaceMode !== "read") return;
+  clearTimeout(pdfZoomTimer);
+  pdfZoomTimer = setTimeout(async () => {
+    if (typeof window.setPdfZoom !== "function") return;
+    try {
+      await window.setPdfZoom($("doc"), view.zoom);
+      pdfZoomApplied = view.zoom;
+      await anchorAll();
+      renderRegions();
+      drawLines();
+    } catch { /* 渲染失败保持现状，下次缩放再试 */ }
+  }, 320);
+}
+
 function applyTransform() {
   if (!isCanvasMode()) {
     const world = $("world");
     world.style.transform = "none";
-    $("page").style.zoom = String(view.zoom);
+    if (state.mode === "pdf") {
+      // PDF：CSS zoom 只会让画布在 flex 里被压缩（永远「没有变化」的假放大），
+      // 缩放交给 pdf-layer 真正重渲染
+      $("page").style.zoom = "";
+      schedulePdfZoom();
+    } else {
+      $("page").style.zoom = String(view.zoom); // 流式文档：放大 = 加大字号，自适应可用宽
+    }
     $("zoom").textContent = `${Math.round(view.zoom * 100)}%`;
     $("viewport").style.backgroundSize = "auto";
     $("viewport").style.backgroundPosition = "0 0";
@@ -215,7 +241,8 @@ function zoomAt(factor, clientX, clientY) {
   if (!isCanvasMode()) {
     const viewport = $("viewport");
     const old = view.zoom;
-    view.zoom = Math.min(2, Math.max(0.65, view.zoom * factor));
+    // 与浏览器/PDF 阅读器一致：放大只作用于文档内容，范围放开到 50%–300%
+    view.zoom = Math.min(3, Math.max(0.5, view.zoom * factor));
     const ratio = view.zoom / old;
     viewport.scrollLeft = (viewport.scrollLeft + clientX - viewport.getBoundingClientRect().left) * ratio - (clientX - viewport.getBoundingClientRect().left);
     viewport.scrollTop = (viewport.scrollTop + clientY - viewport.getBoundingClientRect().top) * ratio - (clientY - viewport.getBoundingClientRect().top);
@@ -244,11 +271,36 @@ function centerOn(worldX, worldY) {
   applyTransform();
 }
 
+/* 阅读模式的「适合宽度」：按正文可用宽度真实计算——与浏览器/PDF 阅读器同语义，
+   不再是自创的「重置为 100%」。 */
+function fitReadWidth() {
+  const page = $("page");
+  const viewport = $("viewport");
+  const cards = $("cards");
+  if (state.mode === "pdf") { view.zoom = 1; applyTransform(); viewport.scrollTo({ left: 0, behavior: "smooth" }); return; } // PDF fit 基准由 pdf-layer 按容器宽计算
+  const cardsVisible = !document.body.classList.contains("cards-hidden") && window.innerWidth > 1180;
+  const chrome = (cardsVisible ? 340 : 0) + 34 + 24; // fixed 反馈栏让位 + 间距 + 文档内边距
+  // 以 zoom=1 实测自然宽度（CSS zoom 下 scrollWidth 的缩放语义不可靠，归一再算）
+  const prevZoom = view.zoom;
+  view.zoom = 1; applyTransform();
+  const natural = Math.max(page.scrollWidth, 360);
+  view.zoom = Math.min(3, Math.max(0.5, Math.max(320, viewport.clientWidth - chrome) / natural));
+  applyTransform();
+  // 公式有量测误差（padding/列间隙），直接以实际像素收敛：仍压到反馈栏就再退一档
+  if (cardsVisible) {
+    let guard = 0;
+    while (page.getBoundingClientRect().right > cards.getBoundingClientRect().left + 2 && view.zoom > 0.5 && guard < 8) {
+      view.zoom = Math.max(0.5, view.zoom - 0.05);
+      applyTransform();
+      guard += 1;
+    }
+  }
+  viewport.scrollTo({ left: 0, behavior: "smooth" });
+}
+
 function fit() {
   if (!isCanvasMode()) {
-    view.zoom = 1;
-    applyTransform();
-    $("viewport").scrollTo({ left: 0, top: 0, behavior: "smooth" });
+    fitReadWidth();
     return;
   }
   const rect = $("viewport").getBoundingClientRect();
@@ -2022,6 +2074,8 @@ async function renderDocument() {
           const inner = frame.contentDocument;
           if (!inner) return;
           frame.style.height = `${Math.max(720, inner.documentElement.scrollHeight, inner.body ? inner.body.scrollHeight : 0)}px`;
+          // 按内容实际宽度显示（简历等固定设计宽不再被容器压窄；响应式页面取不小于阅读宽）
+          frame.style.width = `${Math.max(inner.documentElement.scrollWidth, 940)}px`;
         };
         resize();
         if (window.ResizeObserver && frame.contentDocument && frame.contentDocument.body) {
@@ -2610,6 +2664,13 @@ function syncWorkspaceModeUi() {
   $("btn-fit").textContent = isCanvasMode() ? "显示全部" : "适合宽度";
   $("btn-layout").disabled = !isCanvasMode();
   $("btn-lines").disabled = !isCanvasMode();
+  // Word/PDF 等只读格式：编辑入口明确禁用并说明，而不是点了没反应
+  const editBtn = document.querySelector('[data-workspace-mode="edit"]');
+  if (editBtn) {
+    const editable = isEditableDocument();
+    editBtn.classList.toggle("mode-disabled", !editable);
+    editBtn.title = editable ? "进入源码编辑（⌘S 保存）" : "这种格式只读预览；修改走「批注 → 交给 Agent 改稿」，或另存为 Markdown/HTML 编辑";
+  }
 }
 
 async function setWorkspaceMode(mode) {
@@ -2874,6 +2935,16 @@ $("btn-out").addEventListener("click", () => {
   zoomAt(1 / 1.15, rect.left + rect.width / 2, rect.top + rect.height / 2);
 });
 $("btn-fit").addEventListener("click", fit);
+/* 右侧反馈栏可折叠：阅读的主体责任是文字本身；隐藏后批注走顶栏「批注」抽屉 */
+$("btn-cards").addEventListener("click", () => {
+  const hidden = document.body.classList.toggle("cards-hidden");
+  $("btn-cards").setAttribute("aria-pressed", String(hidden));
+  try { localStorage.setItem("coeditor.cardsHidden", hidden ? "1" : "0"); } catch {}
+  if (!isCanvasMode()) fitReadWidth();
+});
+try { if (localStorage.getItem("coeditor.cardsHidden") === "1") { document.body.classList.add("cards-hidden"); $("btn-cards").setAttribute("aria-pressed", "true"); } } catch {}
+/* 点缩放百分比回到 100%（浏览器习惯） */
+$("zoom").addEventListener("click", () => { if (!isCanvasMode()) { view.zoom = 1; applyTransform(); } });
 $("btn-layout").addEventListener("click", tidyLayout);
 $("btn-theme").addEventListener("click", () => {
   document.body.classList.toggle("paper-dark");

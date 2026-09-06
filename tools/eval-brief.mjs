@@ -54,7 +54,8 @@ await sleep(1600);
 // 打开 ••• 视图菜单 → 点「交给 Agent」
 await evaluate(`document.getElementById('view-menu').open = true`);
 await sleep(250);
-const askPoint = await evaluate(`(() => { const b = document.getElementById('btn-edit-ask'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+const askPoint = await evaluate(`(() => { if (!document.getElementById('btn-edit-ask')) throw new Error('DEBUG btn-missing | ready=' + document.readyState + ' | url=' + location.href.slice(0, 80) + ' | title=' + document.title + ' | bodyLen=' + document.body.innerHTML.length);
+  const b = document.getElementById('btn-edit-ask'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
 await click(askPoint.x, askPoint.y);
 await sleep(700);
 const panelShown = await evaluate(`!!document.getElementById('export-save-md') && !!document.getElementById('export-copy')`);

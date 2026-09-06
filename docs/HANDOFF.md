@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.3.0 · 2026-09-06
+> 最后更新：v1.3.1 · 2026-09-06
 
 ## 产品一句话
 
@@ -50,7 +50,8 @@
 28. **回应与退回的归属**：「回应了 N 条」和退回重开都看 `lastResolvedNos`（roundHistory 里最近一次 agent-resolved 的 resolved 列表），**不能按 currentRound 过滤**（推进后会假报 0），也**不能全量重开 addressed**（会翻出无关历史）。批次计数单调前进，退回不回滚 docRounds。
 29. **版本对照读快照**：有 snapshot 的版本，diff 与排版并排都读登记时刻的字节（`basis:'snapshot'`）；活动文件与快照的差异走 `changed` 单独上报。登记的哈希与快照来自同一次读取。幂等身份含 sourceHash。
 30. **ROOT 是真实路径**：启动/setVault 都做 realpath 归一化（macOS /var→/private/var）；写入口（write/create-file/save-brief）走 `safeResolveReal`（symlink 越界拒绝）；`/api/write` 的 baseMtime 必填。**新测试比对 root 时必须用 realpath 同基**（run-battery/eval-recent 有范例）。
-31. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
+31. **阅读缩放模型（动缩放前必读）**：阅读模式滚动容器是 `#viewport`（overflow:auto，v1.3.1 起）；流式文档（md/txt/docx）的缩放 = CSS zoom 加大字号，flex 会把视觉宽度压回可用区（**永不溢出**）；PDF 是固定像素内容，缩放必须走 `window.setPdfZoom`（zoom 因子传入 pdf-layer 重渲染，复用文档句柄）——**CSS zoom 对 PDF 是假放大**（画布被压回容器宽）。右栏反馈栏是 fixed 侧栏（z-index 9，**必须低于 #bar 的 z10**——bar 有 backdrop-filter 形成 stacking context，下拉菜单对外只有 bar 的层级），#world 用 padding-right 让位。「适合宽度」以实际像素收敛（fitReadWidth），不要用公式一步到位。
+32. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
 
 ## 测试电池（发布门禁）
 
