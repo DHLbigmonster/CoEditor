@@ -178,8 +178,8 @@ body.paper-dark #doc code { background: #2b2720; }
 body.paper-dark #doc pre { background: #181510; }
 
 .anchor {
-  background: rgba(13, 13, 13, .07);
-  border-radius: 2px; cursor: pointer;
+  background: transparent;
+  border-radius: 0; cursor: pointer; /* 无底无圆角：底色块在 PDF 缩放下呈"方格子"（用户否决），hover 才显底 */
 }
 /* 悬停互链：批注卡 ↔ 正文。描边而非改底色，避免与保留(黄)/删除线/已处理(绿)的语义色混淆 */
 .anchor.coeditor-peek, .region.coeditor-peek {
@@ -211,8 +211,9 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
 .anchor:not([data-kind="highlight"]):not([data-kind="strike"]) {
   box-shadow: inset 0 -1.5px 0 rgba(13, 13, 13, .22);
 }
-.anchor:not([data-kind="highlight"]):not([data-kind="strike"]):hover {
-  background: rgba(13, 13, 13, .06);
+.anchor:not([data-kind="highlight"]):not([data-kind="strike"]):hover,
+.anchor:not([data-kind="highlight"]):not([data-kind="strike"]).coeditor-peek {
+  background: rgba(13, 13, 13, .055);
 }
 .anchor[data-status="addressed"]:not([data-kind="highlight"]) { box-shadow: inset 0 -1.5px 0 rgba(125, 171, 96, .5); }
 .anchor[data-status="stale"]:not([data-kind="highlight"]) { box-shadow: inset 0 -1.5px 0 rgba(207, 160, 73, .55); }
