@@ -54,7 +54,13 @@ await evaluate(`document.getElementById('btn-vault').click()`);
 await sleep(900);
 
 const modalOpen = await evaluate(`!document.getElementById('fs-modal').hidden`);
-const recentCount = await evaluate(`document.querySelectorAll('#fs-recent .fs-recent-item').length`);
+// 列表是 fetch 后异步渲染的：轮询等它出现，避免慢响应被误判为 0 条
+let recentCount = 0;
+for (let i = 0; i < 12; i += 1) {
+  recentCount = await evaluate(`document.querySelectorAll('#fs-recent .fs-recent-item').length`);
+  if (recentCount > 0) break;
+  await sleep(400);
+}
 const currentMarked = await evaluate(`document.querySelectorAll('#fs-recent .fs-recent-item.cur').length === 1`);
 
 // 点一条「非当前」的记录 → 应直接切换 vault

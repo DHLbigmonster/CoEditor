@@ -322,7 +322,7 @@ body.lines-quiet #lines path.lit { opacity: .9 !important; }
 }
 #doc .pdf-page canvas { display: block; border-radius: 4px; }
 #doc .pdf-text { position: absolute; inset: 0; }
-#doc .pdf-text span { color: transparent; font-family: Helvetica, Arial, sans-serif; }
+#doc .pdf-text span { color: transparent; } /* 字体由官方层按 PDF 度量内联提供，外部不再强制 Helvetica */
 body.paper-dark #doc .pdf-page { background: #fff; }
 /* 多列阅读布局（1/2/3 列，像正常阅读 PDF 一样展开） */
 #doc.pdf-multi { display: flex; flex-wrap: wrap; gap: 16px; align-content: flex-start; }
@@ -1347,3 +1347,32 @@ body:not([data-workspace-mode="canvas"]) #zoom { cursor: zoom-out; }
 body[data-workspace-mode="read"] #page:has(.html-view) { max-width: none; }
 /* 只读格式的编辑入口：明确禁用态，说明放在 title */
 .mode-seg .mode-disabled { opacity: .38; cursor: not-allowed; }
+
+/* ---------- v1.4 · PDF 官方文字层（pdf.js TextLayer） ----------
+   替代手工近似的 span 定位：与页面 viewport 完全一致的排版度量。
+   锚定高亮 .anchor 仍注入层内（wrapRange），透明文字规则保留。 */
+#doc .textLayer {
+  position: absolute; inset: 0;
+  overflow: clip; opacity: 1; line-height: 1;
+  text-align: initial; forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: transparent;
+}
+#doc .textLayer span { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+#doc .textLayer span.mark { color: transparent; }
+#doc .textLayer ::selection { background: rgba(13, 13, 13, .16); }
+#doc .textLayer .endOfContent { position: absolute; inset: 100% 0 0 0; z-index: -1; display: block; user-select: none; }
+#doc .textLayer .endOfContent.active { top: 0; }
+/* 渲染失败页：明确错误 + 重试，不留白冒充加载成功 */
+.pdf-page.pdf-paint-error canvas { opacity: .25; }
+.pdf-page .pdf-retry {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  padding: 12px 16px; border-radius: 10px; background: rgba(255, 255, 255, .96);
+  border: 1px solid rgba(214, 69, 69, .35); font-size: 12px; color: #d64545;
+  max-width: 80%; text-align: center;
+}
+.pdf-page .pdf-retry button {
+  border: 0; border-radius: 7px; padding: 5px 14px; cursor: pointer;
+  background: #0d0d0d; color: #fff; font-size: 12px;
+}

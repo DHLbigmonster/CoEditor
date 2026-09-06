@@ -46,17 +46,34 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   const paint = (item) => {
     paintChain = paintChain
       .then(async () => {
-        if (item.canvas.dataset.painted || !item.canvas.isConnected) return;
-        item.canvas.dataset.painted = "1";
-        const context = item.canvas.getContext("2d");
-        const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
-        await item.page.render({ canvasContext: context, viewport: item.viewport, transform }).promise;
-      })
-      .catch(() => {}); // 单页绘制失败不阻塞队列
+        if (item.canvas.dataset.painted === "1" || !item.canvas.isConnected) return;
+        try {
+          const context = item.canvas.getContext("2d");
+          const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
+          await item.page.render({ canvasContext: context, viewport: item.viewport, transform }).promise;
+          item.canvas.dataset.painted = "1"; // 真正画完才算 painted——失败留空不能冒充加载成功
+          item.wrapper.querySelector(".pdf-retry")?.remove();
+          item.wrapper.classList.remove("pdf-paint-error");
+        } catch (error) {
+          item.canvas.dataset.painted = "error";
+          if (item.wrapper) {
+            item.wrapper.classList.add("pdf-paint-error");
+            const bar = document.createElement("div");
+            bar.className = "pdf-retry";
+            bar.innerHTML = `<span>本页渲染失败：${String(error && error.message || error).slice(0, 80)}</span>`;
+            const retry = document.createElement("button");
+            retry.textContent = "重试";
+            retry.addEventListener("click", () => { item.canvas.dataset.painted = ""; paint(item); });
+            bar.appendChild(retry);
+            item.wrapper.appendChild(bar);
+          }
+        }
+      });
     return paintChain;
   };
 
   let text = "";
+  const textJobs = [];
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const viewport = page.getViewport({ scale });
@@ -76,7 +93,7 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
     wrapper.appendChild(canvas);
 
     const layer = document.createElement("div");
-    layer.className = "pdf-text";
+    layer.className = "pdf-text textLayer"; // textLayer = 官方类名（配官方样式）；pdf-text 保留给锚定/样式选择器
     layer.style.width = `${viewport.width}px`;
     layer.style.height = `${viewport.height}px`;
     wrapper.appendChild(layer);
@@ -88,33 +105,28 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
 
     container.appendChild(wrapper);
 
-    // 文本层即时建立（批注锚定、全文提取、检索都依赖它）
+    // 文本提取（批注锚定、全文提取、检索都依赖 text 字符串）与文字层渲染解耦
     const content = await page.getTextContent();
     for (const item of content.items) {
       if (!item.str) continue;
-      const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-      const fontHeight = Math.hypot(tx[2], tx[3]) || 12;
-      const span = document.createElement("span");
-      span.textContent = item.str;
-      span.style.position = "absolute";
-      span.style.left = `${tx[4]}px`;
-      span.style.top = `${tx[5] - fontHeight}px`;
-      span.style.fontSize = `${fontHeight}px`;
-      span.style.lineHeight = `${fontHeight}px`;
-      span.style.transformOrigin = "left top";
-      span.style.whiteSpace = "pre";
-      layer.appendChild(span);
       text += item.str;
       if (item.hasEOL) text += "\n";
     }
 
-    // 首屏两页立即绘制，其余进入按需队列
+    // 官方 TextLayer 并行渲染：占位结构按页序即时出现，首屏不被长文档的串行 DOM 构建阻塞
+    const textLayer = new pdfjsLib.TextLayer({ textContentSource: content, container: layer, viewport });
+    textJobs.push(textLayer.render());
+
+    // 首屏两页立即绘制，其余进入按需队列（item 必须带 wrapper：失败重试 UI 要挂上去，
+    // 而且任何一项的异常都不能污染 paintChain 导致后续页永不绘制）
+    const item = { page, canvas, viewport, wrapper };
     if (pageNumber <= 2) {
-      paint({ page, canvas, viewport });
+      paint(item);
     } else {
-      paintQueue.push({ page, canvas, viewport, wrapper });
+      paintQueue.push(item);
     }
   }
+  await Promise.all(textJobs);
 
   // 缩放后恢复阅读位置（上下偏差可控，优先不出视口）
   if (scrollTop > 0) container.closest("#viewport").scrollTop = scrollTop;

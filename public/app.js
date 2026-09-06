@@ -2545,9 +2545,11 @@ async function saveAnnotation() {
   toast("批注已保存，编号永久保留");
 }
 
-$("composer-save").addEventListener("click", saveAnnotation);
+// 保存失败要落在用户眼前（composer 保持打开可重试），而不是变成全局「操作未完成」
+const saveAnnotationSafe = () => saveAnnotation().catch(error => toast("保存失败：" + String(error?.message || error)));
+$("composer-save").addEventListener("click", saveAnnotationSafe);
 $("composer-input").addEventListener("keydown", (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") saveAnnotation();
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") saveAnnotationSafe();
   if (event.key === "Escape") closeComposer();
 });
 
