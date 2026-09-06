@@ -5,8 +5,8 @@ import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modu
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();
-let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith("http://127.0.0.1:4401"));
-if (!page) { page = await (await fetch("http://127.0.0.1:9333/json/new?http://127.0.0.1:4401", { method: "PUT" })).json(); }
+let page = targets.find((t) => t.type === "page" && (t.url || "").startsWith(BASE));
+if (!page) { page = await (await fetch(`http://127.0.0.1:9333/json/new?${BASE}`, { method: "PUT" })).json(); }
 const ws = new WebSocket(page.webSocketDebuggerUrl, { perMessageDeflate: false });
 let id = 0; const pendingMap = new Map();
 const send = (method, params = {}) => new Promise((res, rej) => {

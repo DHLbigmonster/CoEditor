@@ -242,7 +242,6 @@ function zoomAt(factor, clientX, clientY) {
     const viewport = $("viewport");
     const old = view.zoom;
     // 与浏览器/PDF 阅读器一致：放大只作用于文档内容，范围放开到 50%–300%
-    state.fitFollow = false; // 手动缩放后尺寸变化不再自动重适配
     view.zoom = Math.min(3, Math.max(0.5, view.zoom * factor));
     const ratio = view.zoom / old;
     viewport.scrollLeft = (viewport.scrollLeft + clientX - viewport.getBoundingClientRect().left) * ratio - (clientX - viewport.getBoundingClientRect().left);
@@ -272,32 +271,25 @@ function centerOn(worldX, worldY) {
   applyTransform();
 }
 
-/* 阅读模式的「适合宽度」：按正文可用宽度真实计算——与浏览器/PDF 阅读器同语义，
-   不再是自创的「重置为 100%」。 */
+/* 「适合宽度」：纸面缩放因子回到 1——纸面宽度由 updatePaperWidth 维护为
+   min(820, 可用宽)，天然等于可用宽。PDF 的 fit 基准由 pdf-layer 按容器宽计算。 */
 function fitReadWidth() {
-  const page = $("page");
-  const viewport = $("viewport");
-  const cards = $("cards");
-  if (state.mode === "pdf") { view.zoom = 1; applyTransform(); viewport.scrollTo({ left: 0, behavior: "smooth" }); return; } // PDF fit 基准由 pdf-layer 按容器宽计算
-  const cardsVisible = !document.body.classList.contains("cards-hidden") && window.innerWidth > 1180;
-  const chrome = (cardsVisible ? 340 : 0) + 34 + 24; // fixed 反馈栏让位 + 间距 + 文档内边距
-  // 以 zoom=1 实测自然宽度（CSS zoom 下 scrollWidth 的缩放语义不可靠，归一再算）
-  const prevZoom = view.zoom;
-  view.zoom = 1; applyTransform();
-  const natural = Math.max(page.scrollWidth, 360);
-  state.fitFollow = true; // fit 过之后，侧栏/窗口尺寸变化自动跟随重适配
-  view.zoom = Math.min(3, Math.max(0.5, Math.max(320, viewport.clientWidth - chrome) / natural));
+  updatePaperWidth();
+  view.zoom = 1;
   applyTransform();
-  // 公式有量测误差（padding/列间隙），直接以实际像素收敛：仍压到反馈栏就再退一档
-  if (cardsVisible) {
-    let guard = 0;
-    while (page.getBoundingClientRect().right > cards.getBoundingClientRect().left + 2 && view.zoom > 0.5 && guard < 8) {
-      view.zoom = Math.max(0.5, view.zoom - 0.05);
-      applyTransform();
-      guard += 1;
-    }
-  }
-  viewport.scrollTo({ left: 0, behavior: "smooth" });
+  $("viewport").scrollTo({ left: 0, behavior: "smooth" });
+}
+
+/* 固定版心纸面（md/txt/docx/json/csv = 理想 820px）：
+   100% 时自动适配可用宽（小窗不横滚），放大后按比例超出产生内部滚动。
+   HTML 是网页，例外：保持自适应（CSS :has 分支）。 */
+function updatePaperWidth() {
+  if (isCanvasMode()) return;
+  if (state.mode === "pdf" || document.querySelector("#page .html-view")) return; // PDF/html 各有自适应
+  const viewport = $("viewport");
+  const cardsVisible = !document.body.classList.contains("cards-hidden") && window.innerWidth > 1180;
+  const avail = Math.max(360, viewport.clientWidth - (cardsVisible ? 340 : 0) - 58); // 反馈栏让位 + 文档内边距
+  document.documentElement.style.setProperty("--paper-w", `${Math.min(820, avail)}px`);
 }
 
 function fit() {
@@ -1022,6 +1014,12 @@ function startCardEdit(card, annotation) {
 /* ---------------- 牵引线 ---------------- */
 function drawLines() {
   const svg = $("lines");
+  // 文本文档（md/txt/docx/html）阅读模式不画引导线：卡片是固定侧栏（线坐标系失效），
+  // 且必须连 SVG 层一起隐藏——12000px 画布会把 overflow:auto 的正文区撑出假横滚。
+  // 图片/PDF 的区域线与画布线保留
+  const textFamily = state.mode === "text" || state.mode === "docx" || state.mode === "html";
+  if (textFamily && !isCanvasMode()) { svg.innerHTML = ""; svg.style.display = "none"; return; }
+  svg.style.display = "";
   svg.setAttribute("width", "12000");
   svg.setAttribute("height", "12000");
   svg.innerHTML = "";
@@ -2079,8 +2077,7 @@ async function renderDocument() {
           const inner = frame.contentDocument;
           if (!inner) return;
           frame.style.height = `${Math.max(720, inner.documentElement.scrollHeight, inner.body ? inner.body.scrollHeight : 0)}px`;
-          // 按内容实际宽度显示（简历等固定设计宽不再被容器压窄；响应式页面取不小于阅读宽）
-          frame.style.width = `${Math.max(inner.documentElement.scrollWidth, 940)}px`;
+          // HTML 是网页：宽度跟随容器自适应（响应式），高度按内容——不按内容撑宽
         };
         resize();
         if (window.ResizeObserver && frame.contentDocument && frame.contentDocument.body) {
@@ -2127,6 +2124,7 @@ async function loadAnnotations({ rerender = true } = {}) {
     }
   }
   extractOutline();
+  updatePaperWidth();
   renderCards();
   applyTransform();
   // 版本数轻量预取：让「版本对照」Tab 一开始就显示真实数量，而不是打开过后才正确
@@ -3003,7 +3001,7 @@ $("rail-resizer").addEventListener("pointerdown", (event) => {
     $("rail-resizer").removeEventListener("pointercancel", up);
     document.body.classList.remove("resizing-rail");
     clearTimeout(railFitTimer);
-    railFitTimer = setTimeout(() => { if (state.fitFollow && !isCanvasMode()) fitReadWidth(); }, 180);
+    railFitTimer = setTimeout(() => { if (!isCanvasMode()) updatePaperWidth(); }, 180);
   };
   $("rail-resizer").addEventListener("pointermove", move);
   $("rail-resizer").addEventListener("pointerup", up);
@@ -3337,7 +3335,7 @@ window.addEventListener("resize", () => {
   railFitTimer = setTimeout(() => {
     if (isCanvasMode()) return;
     if (state.mode === "pdf") { schedulePdfZoom(); return; } // 容器宽/DPR 变化：PDF 按新条件重渲染（不拉伸旧位图）
-    if (state.fitFollow) fitReadWidth();
+    updatePaperWidth(); // 流式文档 100% 恒适配可用宽；zoom 因子保持
   }, 200);
 });
 // 跨屏拖动时 devicePixelRatio 变化不触发 resize：单独监听并重挂

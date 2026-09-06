@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.3.4 · 2026-09-06
+> 最后更新：v1.3.5 · 2026-09-06
 
 ## 产品一句话
 
@@ -57,7 +57,9 @@
 35. **PDF 文字层是官方 TextLayer**（pdf.js 6.3，`new TextLayer({ textContentSource, container, viewport }).render()`）：不要回退到手工 span 拼定位——无法处理 PDF 度量。锚定兼容靠「span 内仍是真实文本节点」（buildIndex/wrapRange 不关心 span 结构）。容器双类名 `pdf-text textLayer`（锚定/样式选择器 + 官方样式）。
 36. **paint 队列纪律**：paint item 必须带 wrapper；任何单项异常不得污染 paintChain（catch 后返回 resolved）——链条被 reject 会让所有后续页**静默停止渲染**（症状：长文档只有第 1 页有画布）。失败页走 `.pdf-retry` 重试 UI，painted 只在 render 成功后置 "1"。
 37. **访问令牌（F12 第一块）**：`COEDITOR_TOKEN` env 设置后全请求鉴权（cookie/?token=/Bearer 三通道，401 或登录页）；电池与本地默认不设、行为不变。**部署到内网/公网必须设**；CLI 侧读同名 env 自动携带。多用户隔离（每用户独立 vault）仍是大工程，别把令牌当成多租户。
-38. **HTML 预览 CSP**：buildHtmlCoedit 的 preview 注入 `<meta http-equiv="CSP">`——script/fetch/iframe 全禁（与 sandbox 双保险），图片/样式/字体放行。original 树（写回用）**绝不注入**，否则 CSP 会写进用户源文件。
+38. **阅读版式双模型**：md/txt/docx/json/csv = **固定版心纸面**（`--paper-w` = min(820, 可用宽)，updatePaperWidth 维护；100% 恒适配不横滚，zoom 放大整张纸产生内部滚动）；**HTML 例外自适应**（跟随容器宽，frame 不按内容撑宽——按内容撑会造出 2000px+ 超宽页）。任何新的文档格式都要选边并写进 kindOf 分支。
+39. **引导线范围**：只在 image/pdf（区域线）与 canvas 画线；text/docx/html 阅读模式 drawLines 早退并隐藏 SVG（fixed 侧栏让线坐标系失效 + 12000px SVG 撑假横滚）。恢复前先解决坐标体系。
+40. **HTML 预览 CSP**：buildHtmlCoedit 的 preview 注入 `<meta http-equiv="CSP">`——script/fetch/iframe 全禁（与 sandbox 双保险），图片/样式/字体放行。original 树（写回用）**绝不注入**，否则 CSP 会写进用户源文件。
 39. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
 
 ## 测试电池（发布门禁）

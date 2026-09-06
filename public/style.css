@@ -965,11 +965,17 @@ body.editing-doc #doc { padding: 0; }
    随文档滚动 —— 人边读边批时能看到自己写过的每一条 */
 body[data-workspace-mode="read"] #world {
   display: flex; align-items: flex-start; gap: 22px;
-  max-width: 1400px; margin: 0 auto;
+  min-width: 100%; width: max-content;
+  padding-left: 24px; box-sizing: border-box;
 }
+/* 非_HTML 文档 = 固定版心纸面（像 Word/PDF 的页面）：不随窗口/侧栏伸缩，
+   缩放是整张纸的缩放（zoom 布局尺寸随之变大，正文区内部滚动）；
+   HTML 是网页，例外：保持自适应 */
 body[data-workspace-mode="read"] #page {
-  flex: 1 1 auto; min-width: 0; margin: 0;
-  width: auto; max-width: 960px;
+  flex: 0 0 auto; width: var(--paper-w, 820px); max-width: none; margin: 0;
+}
+body[data-workspace-mode="read"] #page:has(.html-view) {
+  flex: 1 1 auto; width: auto; min-width: 0; max-width: none;
 }
 body[data-workspace-mode="read"] #cards {
   display: block; position: static; flex: 0 0 318px; align-self: flex-start;
@@ -988,9 +994,9 @@ body[data-workspace-mode="edit"] #cards { display: none; }
 
 /* 窄窗：批注侧栏收起，文档占满可读宽度（批注经顶栏「批注」抽屉查看） */
 @media (max-width: 1180px) {
-  body[data-workspace-mode="read"] #world { display: block; }
+  body[data-workspace-mode="read"] #world { display: block; padding-right: 24px; }
   body[data-workspace-mode="read"] #cards { display: none; }
-  body[data-workspace-mode="read"] #page { margin: 0 auto; width: min(960px, 100%); }
+  body[data-workspace-mode="read"] #page { margin: 0 auto; }
 }
 
 /* ================= v0.7.1 · 批注筛选三态（仅生效 / 本轮 / 全部） ================= */
@@ -1328,6 +1334,9 @@ body[data-workspace-mode="read"] #html-frame [data-coedit]:hover { outline: 1.5p
 /* 缩放只作用于文档内容：放大超出视口时，滚动条出现在正文区内部，
    右侧反馈栏 sticky 钉住不被顶走（此前 overflow:hidden 直接把放大的内容裁掉） */
 body[data-workspace-mode="read"] #viewport { overflow: auto; }
+/* 文本文档（md/txt/docx/html）阅读模式：引导线坐标体系随固定侧栏失效，
+   SVG 层由 drawLines 早退隐藏（12000px 画布会把 overflow:auto 的正文区撑出假横滚）。
+   图片/PDF/画布的引导线保留 */
 /* 右栏固定为窗口侧栏（像 PDF 阅读器）：横向缩放滚动时永远钉在右缘，不被内容顶走；
    文档区通过 world 的右内边距给它让位 */
 body[data-workspace-mode="read"]:not(.cards-hidden) #world { padding-right: 340px; }
