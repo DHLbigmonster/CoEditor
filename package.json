@@ -1,6 +1,6 @@
 {
   "name": "coeditor",
-  "version": "1.3.5",
+  "version": "1.4.0",
   "description": "本地文档阅读、编辑与批注层：批次编号、内容保留和 Agent 修改约束",
   "type": "module",
   "bin": {
@@ -22,5 +22,8 @@
     "public/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "ws": "^8.21.3"
+  }
 }
