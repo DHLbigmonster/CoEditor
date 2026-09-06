@@ -1,5 +1,5 @@
 // E2E：docx / HTML 真实鼠标拖选 → 浮条（补齐交互测试矩阵；只读断言零写入，不打扰用户会话）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();

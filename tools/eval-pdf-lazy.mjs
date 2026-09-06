@@ -1,7 +1,7 @@
 // PDF 按需渲染 E2E：自包含（node 侧生成 12 页测试 PDF）+ 惰性绘制 + 滚动触发 + 文本层完整
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery";

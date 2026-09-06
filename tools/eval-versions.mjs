@@ -2,7 +2,7 @@
 // 覆盖：登记幂等 / 同文件多路径拒绝 / 按 id 验收不验收错对象 / 内容漂移拒绝验收 /
 //       顺序敏感 diff（段落重排必须被发现）/ 服务端保留继承（幂等 + 缺失报警）/ UI 真实跳转
 // 本套件只动自己的子目录（电池共享 vault，绝不清别人的文档与批注）。
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";

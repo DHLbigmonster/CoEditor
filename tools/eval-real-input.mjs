@@ -2,7 +2,7 @@
 // 验证：① md 拖选不触发画布平移 + 浮条弹出 ② 保留落锚且无牵引线 ③ PDF 保留无文字重影
 //       ④ 双击进编辑模式 ⑤ 文件夹选择器弹窗
 // 前置：已 POST /api/vault 切到一次性副本 vault（测试数据不污染 sample）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const list = await (await fetch(`${BASE.replace("4400", "9333").replace("http", "http")}`)).json().catch(() => null);

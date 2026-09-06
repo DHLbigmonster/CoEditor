@@ -1,5 +1,5 @@
 // v0.9.5：多 vault 最近打开记录（选择器顶部直切，去重/置顶/过滤失效目录）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 import { realpath } from "node:fs/promises";

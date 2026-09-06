@@ -1,5 +1,5 @@
 // HTML 双击直改 E2E：真实双击 iframe 段落 → 面板 → 保存 → 源文件校验（URL 纯净 / 批注重锚定 / 还原）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { readFileSync } from "node:fs";
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery";

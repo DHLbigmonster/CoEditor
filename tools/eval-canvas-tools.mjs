@@ -1,5 +1,5 @@
 // 画布工具 E2E：保留必要工具，并验证图片拖动不会带动画布（真实鼠标事件 + sidecar 落盘）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { readFileSync } from "node:fs";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";

@@ -1,5 +1,5 @@
 // v0.9.3：把「交给 Agent」的修改指令落成 vault 里的 .md（同名自动 -2，绝不覆盖）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 

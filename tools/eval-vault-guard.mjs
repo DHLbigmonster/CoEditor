@@ -1,6 +1,6 @@
 // vault 切换守卫回归：服务端切目录时，页面轮询不得虚推进批次，且视图正确重置
 // 前置：server 已在 BASE 上以 VAULT 为根运行（battery 编排器负责）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-m7-vault"; // 页面当前所在 vault
 const AWAY = process.env.COEDITOR_E2E_AWAY || "/tmp";                    // 切走的目标（须与 VAULT 不同）

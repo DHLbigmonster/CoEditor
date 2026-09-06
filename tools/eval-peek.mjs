@@ -1,5 +1,5 @@
 // v0.9.3：批注卡 ↔ 正文 悬停互链（抽屉条目 / 画布卡 / 正文锚点 / 区域框，四侧任悬停其一其余点亮）
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const DOC = "研究设计笔记.md";

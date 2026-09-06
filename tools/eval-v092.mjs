@@ -1,5 +1,5 @@
 // v0.9.2 回归：侧栏新建文档（API + UI）、HTML 成品区点选/拖选定位源码、MCP resolve_annotations 闭环。
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

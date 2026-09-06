@@ -1,7 +1,7 @@
 // E2E：PDF 区域框选批注（苹果预览式）+ 批注卡降噪验证
 // 流程：真实鼠标在 PDF 第 1 页拖框 → composer 弹出 → 保存 → 区域 overlay 渲染 + 卡片无冗余徽标
 //       → 切 2 列重渲染 → overlay 仍复位在正确页
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
 const targets = await (await fetch("http://127.0.0.1:9333/json/list")).json();

@@ -1,5 +1,5 @@
 // 生成 12 页测试 PDF（CDP printToPDF）用于按需渲染验收
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { writeFileSync } from "node:fs";
 const created = await (await fetch("http://127.0.0.1:9333/json/new?about:blank", { method: "PUT" })).json();
 const ws = new WebSocket(created.webSocketDebuggerUrl, { perMessageDeflate: false });

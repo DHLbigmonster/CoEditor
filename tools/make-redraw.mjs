@@ -1,5 +1,5 @@
 // 在页面里画「重绘版」低饱和图 → 上传 assets → 贴成画布图卡
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 
 const list = await (await fetch("http://127.0.0.1:9333/json/list")).json();
 let page = list.find(t => t.type === "page");

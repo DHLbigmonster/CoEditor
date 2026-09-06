@@ -1,5 +1,5 @@
 // v0.9 回归：VS Code 式树折叠、批注显示号/编辑/删除、图片区域单次生成、画布元素显式删除。
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { existsSync } from "node:fs";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";

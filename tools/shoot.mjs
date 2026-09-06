@@ -1,6 +1,6 @@
 // CDP 驱动常驻 Chrome (9333)：导航 + 等待 + 截图 + 取 DOM 状态
 // 用法: node shoot.mjs <url> <outfile.png> [waitMs] [evalJs]
-import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
+import WebSocket from "ws";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const [, , url, out, waitMsArg, evalJs, whArg] = process.argv;
