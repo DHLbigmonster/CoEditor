@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 import { acquireStoreLock, readStore, writeStore } from './lib/store.mjs';
-import { reviewSnapshot, resolveReviewed, annotationVersion } from './lib/review.mjs';
+import { reviewSnapshot, resolveReviewed, annotationVersion, buildInstruction } from './lib/review.mjs';
 import { registerVersion, prepareVersionRegistration } from './lib/version.mjs';
 const ROOT = resolve(process.argv[2] || process.cwd());
 const SIDECAR = join(ROOT, ".marginalia", "annotations.json");
@@ -185,6 +185,7 @@ const TOOLS = [
 function brief(item) {
   return {
     id: item.id,
+    instruction: buildInstruction(item, { page: item.region && Number.isFinite(item.region.page) ? item.region.page : null, where: item.region ? "文档区域" : "文中" }),
     no: item.no || null,
     status: item.status,
     weight: item.weight,

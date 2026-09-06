@@ -190,10 +190,15 @@ body.paper-dark #doc pre { background: #181510; }
 .region.coeditor-peek { outline-width: 2.5px; }
 
 /* 高亮 / 删除线标记（mark 型批注） */
+/* 保留 = 飞书式划线：默认细黄下划线（宽随文字），hover/选中才淡黄底 */
 .anchor[data-kind="highlight"] {
-  background: rgba(246, 211, 91, .38);
-  box-shadow: none;
-  border-radius: 3px; /* 保留 = 柔和半透明底色：无边框、无底线、无 padding，不改行内盒尺寸 */
+  background: transparent;
+  box-shadow: inset 0 -2px 0 rgba(230, 168, 25, .55);
+  border-radius: 0;
+}
+.anchor[data-kind="highlight"]:hover,
+.anchor[data-kind="highlight"].coeditor-peek {
+  background: rgba(246, 211, 91, .30);
 }
 body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, .28); }
 .anchor[data-kind="strike"] {
@@ -203,9 +208,15 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
   text-decoration-color: rgba(224, 96, 79, .85);
   text-decoration-thickness: 2px;
 }
-.anchor[data-status="addressed"]:not([data-kind="highlight"]) { background: rgba(125, 171, 96, .14); box-shadow: none; }
-.anchor[data-status="stale"]:not([data-kind="highlight"]) { background: rgba(207, 160, 73, .14); box-shadow: none; }
-.anchor[data-status="deprecated"]:not([data-kind="highlight"]) { background: rgba(125, 122, 117, .08); box-shadow: none; text-decoration: none; }
+.anchor:not([data-kind="highlight"]):not([data-kind="strike"]) {
+  box-shadow: inset 0 -1.5px 0 rgba(13, 13, 13, .22);
+}
+.anchor:not([data-kind="highlight"]):not([data-kind="strike"]):hover {
+  background: rgba(13, 13, 13, .06);
+}
+.anchor[data-status="addressed"]:not([data-kind="highlight"]) { box-shadow: inset 0 -1.5px 0 rgba(125, 171, 96, .5); }
+.anchor[data-status="stale"]:not([data-kind="highlight"]) { box-shadow: inset 0 -1.5px 0 rgba(207, 160, 73, .55); }
+.anchor[data-status="deprecated"]:not([data-kind="highlight"]) { box-shadow: inset 0 -1.5px 0 rgba(125, 122, 117, .4); background: transparent; text-decoration: none; }
 .anchor.flash { animation: flash 1.1s ease; }
 @keyframes flash { 0%, 100% { background: rgba(13, 13, 13, .16); } 35% { background: rgba(13, 13, 13, .5); } }
 
@@ -317,7 +328,7 @@ body.lines-quiet #lines path.lit { opacity: .9 !important; }
   margin: 0 auto 28px;
   background: #fff;
   border-radius: 4px;
-  box-shadow: 0 4px 18px rgba(8, 6, 3, .35);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 6px 20px rgba(0, 0, 0, .10); /* 原 rgba(8,6,3,.35) 深阴影在纸缘形成黑竖带（放大后随 zoom 变粗） */
 }
 #doc .pdf-page canvas { display: block; border-radius: 4px; }
 #doc .pdf-text { position: absolute; inset: 0; }
@@ -904,7 +915,7 @@ body[data-workspace-mode="canvas"] #page { box-shadow: 0 24px 70px rgba(66, 50, 
 #doc.html-view { padding: 0; line-height: normal; overflow: visible; }
 #html-frame { display: block; width: 100%; min-height: 720px; border: 0; background: #fff; border-radius: 10px; }
 
-#doc .pdf-page { box-shadow: 0 5px 22px rgba(55, 44, 30, .14); }
+#doc .pdf-page { box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 24px rgba(0, 0, 0, .08); }
 #doc .pdf-page canvas { width: 100%; height: 100%; }
 
 /* 源码编辑占满可用阅读区，不再是缩放后的一小块 textarea。 */
@@ -972,6 +983,12 @@ body[data-workspace-mode="read"] #world {
    HTML 是网页，例外：保持自适应 */
 body[data-workspace-mode="read"] #page {
   flex: 0 0 auto; width: var(--paper-w, 820px); max-width: none; margin: 0;
+}
+/* PDF：#page 不做背景白板（每一页 PDF 自身就是纸）——透明背景、宽度随内容放大，
+   否则放大时 canvas 超出固定白板，像两块错位的纸 */
+body[data-workspace-mode="read"] #page:has(.pdf-page) {
+  background: transparent; box-shadow: none; border-radius: 0;
+  width: max-content; min-width: var(--paper-w, 820px); max-width: none;
 }
 body[data-workspace-mode="read"] #page:has(.html-view) {
   flex: 1 1 auto; width: auto; min-width: 0; max-width: none;

@@ -3206,15 +3206,23 @@ function constraintsText() {
   // 画布只保留箭头；便签/白板已从产品交互中移除。
   const canvasArrows = state.arrows.filter((item) => ownsCanvas(item) && (item.label || "").trim());
   const noOf = (item) => item.no || item.id;
-  const KIND_LINE = {
-    highlight: (item) => `- [${noOf(item)}·保留]「${item.quote.slice(0, 60)}」\n  （人标记保留：这段内容很好，必须保留，不要改写删除）`,
-    strike: (item) => `- [${noOf(item)}·删除线]「${item.quote.slice(0, 60)}」\n  （人标记删除线：建议删除或重写此段）`,
-  };
+  // U07：每条约束 = 一句自包含任务卡（位置 + 引用 + 意见 + 动作），与 MCP brief 同一生成逻辑
+  const where = (item) => item.region && Number.isFinite(item.region.page) ? `第 ${item.region.page} 页` : "文中";
   const annLine = (item) => {
-    if (KIND_LINE[item.kind]) return KIND_LINE[item.kind](item);
+    const q = (item.quote || "").trim();
+    const ref = q ? `「${q.length > 60 ? q.slice(0, 60) + "…" : q}」` : "";
+    const opinion = (item.body || "").trim();
+    if (item.kind === "highlight") {
+      return `- [${noOf(item)}·保留] ${where(item)}：${ref} 这段必须原样保留——不删除、不改写、不移动${opinion ? `。用户说明：${opinion}` : ""}`;
+    }
+    if (item.kind === "strike") {
+      return `- [${noOf(item)}·删除线] ${where(item)}：${ref} 删除或按新表述重写${opinion ? `。用户意见：${opinion}` : ""}`;
+    }
+    if (item.kind === "region") {
+      return `- [${noOf(item)}·区域] ${where(item)}：用户框选了一块区域。意见：${opinion || "（未填写，请结合页面内容理解）"}`;
+    }
     return [
-      `- [${noOf(item)}] w=${Number(item.weight ?? 1).toFixed(2)} 「${item.quote.slice(0, 60)}」`,
-      `  ${item.body}`,
+      `- [${noOf(item)}] ${where(item)}：针对 ${ref || "该处内容"}，用户要求：${opinion || "（未填写具体意见，请阅读上下文判断合理修改）"}`,
       ...(item.conflicts_with || []).length ? [`  ⚠ 与 ${item.conflicts_with.map(noOf).join("/")} 冲突，未经裁定前先询问用户`] : [],
     ];
   };
