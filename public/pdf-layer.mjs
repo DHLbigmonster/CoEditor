@@ -128,6 +128,14 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   }
   await Promise.all(textJobs);
 
+  // 扫描件（无文字层）：明确说明能力边界——区域批注可用，不承诺不存在的 OCR
+  if (!text.trim() && pdf.numPages > 0 && !container.querySelector(".pdf-scan-hint")) {
+    const hint = document.createElement("div");
+    hint.className = "pdf-scan-hint";
+    hint.innerHTML = "这份 PDF 没有文字层（可能是扫描件）：无法选择文字或按段落批注，<b>建议用「区域批注」（R）框选</b>后写意见。";
+    container.prepend(hint);
+  }
+
   // 缩放后恢复阅读位置（上下偏差可控，优先不出视口）
   if (scrollTop > 0) container.closest("#viewport").scrollTop = scrollTop;
 

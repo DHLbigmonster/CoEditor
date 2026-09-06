@@ -49,6 +49,9 @@ let ROOT = resolve(process.argv[2] || process.cwd());
 // 不归一化的话 safeResolveReal 的前缀比较会把自家文件当越界拒绝
 try { ROOT = await realpath(ROOT); } catch { /* 目录不存在时保持词法路径，让后续 stat 报错 */ }
 const PORT = Number(process.env.COEDITOR_PORT || 4400);
+// 可选访问令牌：部署到内网/公网时的最小鉴权门槛（本地单人使用不必设置）。
+// 设置后所有请求需携带 cookie coeditor_token、?token= 或 Authorization: Bearer；未带则 401/登录页。
+const ACCESS_TOKEN = process.env.COEDITOR_TOKEN || "";
 let SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 // 跨 vault 的全局状态（最近打开的目录）。默认 ~/.coeditor；
 // 电池等隔离场景用 COEDITOR_STATE_DIR 指到临时目录，绝不写用户真实 home。
@@ -211,6 +214,23 @@ const requestHandler = async (req, res) => {
     res.writeHead(code, { "content-type": type, "cache-control": "no-store" });
     res.end(body);
   };
+
+  if (ACCESS_TOKEN) {
+    const cookies = Object.fromEntries(String(req.headers.cookie || "").split(";").map(p => p.trim().split("=")).filter(p => p[0]));
+    const supplied = cookies.coeditor_token || url.searchParams.get("token") || String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (supplied !== ACCESS_TOKEN) {
+      if (url.pathname === "/" || url.pathname === "/index.html") {
+        const wrong = url.searchParams.get("token") !== null; // 提交过但不对
+        res.writeHead(401, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        return res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CoEditor · 访问验证</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#f7f7f8;font:15px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#0d0d0d}form{background:#fff;padding:36px 40px;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:12px;width:min(320px,86vw)}h1{font-size:18px;margin:0}input{border:1px solid #e0e0e0;border-radius:9px;padding:10px 12px;font-size:14px;outline:0}input:focus{border-color:#0d0d0d}button{border:0;border-radius:9px;padding:10px;background:#0d0d0d;color:#fff;font-size:14px;cursor:pointer}.err{color:#d64545;font-size:12.5px}</style></head><body><form method="get" action="/"><h1>CoEditor</h1><input name="token" placeholder="访问令牌" autofocus autocomplete="off">' + (wrong ? '<div class="err">令牌不正确，请重试</div>' : "") + '<button>进入</button></form></body></html>');
+      }
+      return send(401, JSON.stringify({ error: "unauthorized" }));
+    }
+    // token 从 query 进来的（登录表单/CLI）：落到 HttpOnly cookie，避免链接里的令牌被分享出去
+    if (url.searchParams.get("token") === ACCESS_TOKEN && !cookies.coeditor_token) {
+      res.setHeader("set-cookie", "coeditor_token=" + encodeURIComponent(ACCESS_TOKEN) + "; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax");
+    }
+  }
 
   let releaseQueue, releaseStore;
   try {

@@ -2360,6 +2360,12 @@ function buildHtmlCoedit(source) {
     holder.setAttribute("data-coeditor-script", "neutralized");
     node.replaceWith(holder); // 占位保结构，脚本不执行
   });
+  // 外链资源策略（F12）：预览不执行脚本、不跑 fetch、不嵌套框架，本地相对资源照常渲染；
+  // 远程图片/样式可以显示，但策略是显式的——本地批注层不做匿名代理
+  const csp = preview.createElement("meta");
+  csp.setAttribute("http-equiv", "Content-Security-Policy");
+  csp.setAttribute("content", "default-src 'none'; img-src http: https: data: blob:; style-src 'unsafe-inline' http: https:; font-src http: https: data:; media-src http: https: data: blob:; form-action 'none'");
+  if (preview.head) preview.head.prepend(csp);
   preview.querySelectorAll("*").forEach((node) => {
     for (const attr of [...node.attributes]) {
       if (/^on/i.test(attr.name) || attr.name === "data-coedit") node.removeAttribute(attr.name);
@@ -3328,8 +3334,21 @@ async function resetDocView() {
 let railFitTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(railFitTimer);
-  railFitTimer = setTimeout(() => { if (state.fitFollow && !isCanvasMode()) fitReadWidth(); }, 200);
+  railFitTimer = setTimeout(() => {
+    if (isCanvasMode()) return;
+    if (state.mode === "pdf") { schedulePdfZoom(); return; } // 容器宽/DPR 变化：PDF 按新条件重渲染（不拉伸旧位图）
+    if (state.fitFollow) fitReadWidth();
+  }, 200);
 });
+// 跨屏拖动时 devicePixelRatio 变化不触发 resize：单独监听并重挂
+function watchDprChange() {
+  const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+  mq.addEventListener("change", () => {
+    if (state.mode === "pdf" && !isCanvasMode()) schedulePdfZoom();
+    watchDprChange();
+  }, { once: true });
+}
+watchDprChange();
 
 let polling = false;
 setInterval(async () => {
