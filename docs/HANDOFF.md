@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.4.0 · 2026-09-06
+> 最后更新：v1.4.1 · 2026-09-06
 
 ## 产品一句话
 
@@ -59,7 +59,8 @@
 37. **访问令牌（F12 第一块）**：`COEDITOR_TOKEN` env 设置后全请求鉴权（cookie/?token=/Bearer 三通道，401 或登录页）；电池与本地默认不设、行为不变。**部署到内网/公网必须设**；CLI 侧读同名 env 自动携带。多用户隔离（每用户独立 vault）仍是大工程，别把令牌当成多租户。
 38. **阅读版式双模型**：md/txt/docx/json/csv = **固定版心纸面**（`--paper-w` = min(820, 可用宽)，updatePaperWidth 维护；100% 恒适配不横滚，zoom 放大整张纸产生内部滚动）；**HTML 例外自适应**（跟随容器宽，frame 不按内容撑宽——按内容撑会造出 2000px+ 超宽页）。任何新的文档格式都要选边并写进 kindOf 分支。
 39. **U01 真双栏结构**：#cards 在 #work-row（与 #viewport 布局同级），**不在**滚动容器里——动 read 布局前先看这个结构。canvas 模式反馈栏包含块是 work-row（几何与旧 world 一致）。world 的 padding-right 让位机制已删除，别加回来。
-40. **锚点样式分层**：意图样式（kind: highlight 黄底/strike 删除线）与状态样式（addressed/stale/deprecated）分离——状态规则必须 :not([data-kind="highlight"]) 跳过保留（同特异性源顺序覆盖曾把保留画出金色粗底边）。保留永不画线、永不加 padding（PDF 文字层行内盒不可改）。
+40. **飞书式浮卡**：`openAnchorCard`（点击 .anchor[data-ann] → world 内绝对定位浮卡），委托在 #doc（PDF 文字层/md）+ iframe click（HTML）；canvas 模式早退用自己的卡片体系；浮卡操作复用 handleCardAction（容器委托同一入口）；loadAnnotations 时对应批注不存在则自动关闭。新增正文锚点交互走这条链，别再开右栏滚屏。
+41. **锚点样式分层**：意图样式（kind: highlight 黄底/strike 删除线）与状态样式（addressed/stale/deprecated）分离——状态规则必须 :not([data-kind="highlight"]) 跳过保留（同特异性源顺序覆盖曾把保留画出金色粗底边）。保留永不画线、永不加 padding（PDF 文字层行内盒不可改）。
 41. **卡片按钮走容器委托**（#cards click → handleCardAction，annotation 按 id 现查）——列表重建会让逐元素绑定的 click 丢失（「取消保留」间歇性无效的根因）。新增卡片交互一律委托。
 42. **引导线范围**：只在 image/pdf（区域线）与 canvas 画线；text/docx/html 阅读模式 drawLines 早退并隐藏 SVG（fixed 侧栏让线坐标系失效 + 12000px SVG 撑假横滚）。恢复前先解决坐标体系。
 40. **HTML 预览 CSP**：buildHtmlCoedit 的 preview 注入 `<meta http-equiv="CSP">`——script/fetch/iframe 全禁（与 sandbox 双保险），图片/样式/字体放行。original 树（写回用）**绝不注入**，否则 CSP 会写进用户源文件。

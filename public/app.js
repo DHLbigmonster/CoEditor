@@ -738,6 +738,73 @@ async function handleCardAction(button) {
   await loadAnnotations({ rerender: false });
 }
 
+/* ---------- U05/飞书式交互：点击正文锚点 → 就地浮出批注卡 ---------- */
+let floatCard = null; // { el, annId }
+function closeAnchorCard() {
+  if (!floatCard) return;
+  floatCard.el.remove();
+  floatCard = null;
+}
+function openAnchorCard(annotationId, anchorRectWorld) {
+  closeAnchorCard();
+  const item = state.annotations.find(e => e.id === annotationId);
+  if (!item) return;
+  const KIND = { highlight: '<span class="c-kind hl">保留</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
+  const lost = item.kind === "highlight" && (item.anchorStatus === "missing" || item.status === "stale");
+  const body = item.body || (item.kind === "highlight" ? "（标记保留 · 这段内容要保留）" : item.kind === "strike" ? "（删除线标记 · 建议删除此段）" : "");
+  const el = document.createElement("div");
+  el.className = "anchor-float-card";
+  el.innerHTML = `
+    <div class="c-head">
+      <span class="c-id">${displayNo(item)}</span>
+      ${KIND[item.kind] || ""}${lost ? '<span class="c-kind" style="color:#8a6116">待定位</span>' : ""}
+      <button class="fc-close icon" title="关闭">✕</button>
+    </div>
+    <div class="c-body">${escapeHtml(body)}</div>
+    ${item.quote ? `<div class="c-quote">${escapeHtml(item.quote.slice(0, 90))}</div>` : ""}
+    <div class="c-actions">
+      ${item.kind === "highlight"
+        ? '<button data-act="delete" class="danger">取消保留</button>'
+        : item.status === "active"
+          ? '<button data-act="edit">编辑</button><button data-act="addressed">已处理</button><button data-act="delete" class="danger">删除</button>'
+          : '<button data-act="revive">恢复</button><button data-act="delete" class="danger">删除</button>'}
+    </div>`;
+  // 定位：锚点下方 10px；下方空间不足翻上方；左右 clamp 到正文区
+  const world = $("world");
+  const top = anchorRectWorld.y + anchorRectWorld.h + 10;
+  const width = 300;
+  const left = Math.max(4, Math.min(anchorRectWorld.x - 20, (viewportContentWidth() || 900) - width - 12));
+  el.style.left = `${left}px`;
+  el.style.top = `${Math.max(4, top)}px`;
+  el.style.width = `${width}px`;
+  world.appendChild(el);
+  floatCard = { el, annId: annotationId };
+  el.addEventListener("click", (event) => {
+    if (event.target.closest(".fc-close")) { closeAnchorCard(); return; }
+    const button = event.target.closest("button[data-act]");
+    if (!button) return;
+    event.stopPropagation();
+    handleCardAction(button).then(() => closeAnchorCard()).catch(error => toast("操作失败：" + String(error?.message || error)));
+  });
+  // 编辑态：浮卡内 textarea ⌘S 保存后关闭（loadAnnotations 会刷新）
+  el.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { closeAnchorCard(); }
+  });
+  state.selected = annotationId;
+  reportUiState();
+}
+function viewportContentWidth() {
+  const vp = $("viewport");
+  return vp ? vp.clientWidth : window.innerWidth;
+}
+// 点浮卡外部关闭（捕获阶段，避免与选区/锚点点击竞争）
+document.addEventListener("mousedown", (event) => {
+  if (!floatCard) return;
+  if (event.target.closest(".anchor-float-card") || event.target.closest(".anchor[data-ann]")) return;
+  closeAnchorCard();
+}, true);
+window.addEventListener("keydown", (event) => { if (event.key === "Escape") closeAnchorCard(); });
+
 function selectCard(id) {
   state.selected = id;
   const selected = state.annotations.find(a => a.id === id);
@@ -746,6 +813,16 @@ function selectCard(id) {
   drawLines();
   reportUiState();
 }
+
+/* 点击正文锚点（含 PDF 文字层）→ 就地浮出批注卡 */
+$("doc").addEventListener("click", (event) => {
+  if (isCanvasMode()) return; // 画布有自己的批注卡体系
+  const mark = event.target.closest(".anchor[data-ann]");
+  if (!mark || event.target.closest("button, textarea")) return;
+  const rect = mark.getBoundingClientRect();
+  const wr = worldRect(mark);
+  openAnchorCard(mark.dataset.ann, { x: wr.x, y: wr.y, w: wr.w, h: wr.h });
+});
 
 $("cards").addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-act]");
@@ -2203,6 +2280,7 @@ async function loadAnnotations({ rerender = true } = {}) {
   renderImages();
   renderDrafts();
   reportUiState();
+  if (floatCard && !state.annotations.some(e => e.id === floatCard.annId)) closeAnchorCard();
   if (!$('drawer').hidden) renderDrawer();
   if (decayed > 0) toast(decayed + ' 条反馈暂时找不到原文，要求已保留，请检查定位');
 }
@@ -2401,6 +2479,13 @@ function bindHtmlSelection(frame) {
     captureTextSelection(inner.body, frame.contentWindow.getSelection(), { left: frameRect.left, top: frameRect.top });
   });
   inner.addEventListener("mousedown", () => hideSelMenu());
+  inner.addEventListener("click", (event) => {
+    const mark = event.target.closest && event.target.closest(".anchor[data-ann]");
+    if (!mark) return;
+    const frameRect = frame.getBoundingClientRect();
+    const r = mark.getBoundingClientRect();
+    openAnchorCard(mark.dataset.ann, { x: (r.left + frameRect.left) / view.zoom, y: (r.top + frameRect.top) / view.zoom, w: r.width / view.zoom, h: r.height / view.zoom });
+  });
 }
 
 function clearTextSelections() {
@@ -3031,6 +3116,32 @@ function toggleFeedbackPanel() {
 $("btn-cards").addEventListener("click", toggleFeedbackPanel);
 try { if (localStorage.getItem("coeditor.cardsHidden") === "1") { document.body.classList.add("cards-hidden"); $("btn-cards").setAttribute("aria-pressed", "true"); } } catch {}
 $("btn-drawer").hidden = true; // U04：入口合并进「反馈」，按钮保留供旧脚本兼容
+// 反馈栏拖拽调宽（280–460），记忆在本地
+(() => {
+  const saved = Number(localStorage.getItem("coeditor.cardsWidth"));
+  if (Number.isFinite(saved) && saved >= 280 && saved <= 460) document.documentElement.style.setProperty("--cards-w", `${saved}px`);
+})();
+$("cards-resizer").addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  $("cards-resizer").setPointerCapture(event.pointerId);
+  document.body.classList.add("resizing-cards");
+  const move = (moveEvent) => {
+    const width = Math.min(460, Math.max(280, window.innerWidth - moveEvent.clientX));
+    document.documentElement.style.setProperty("--cards-w", `${width}px`);
+  };
+  const up = () => {
+    $("cards-resizer").removeEventListener("pointermove", move);
+    $("cards-resizer").removeEventListener("pointerup", up);
+    $("cards-resizer").removeEventListener("pointercancel", up);
+    document.body.classList.remove("resizing-cards");
+    const width = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cards-w")) || 300;
+    localStorage.setItem("coeditor.cardsWidth", String(width));
+    updatePaperWidth();
+  };
+  $("cards-resizer").addEventListener("pointermove", move);
+  $("cards-resizer").addEventListener("pointerup", up);
+  $("cards-resizer").addEventListener("pointercancel", up);
+});
 /* 点缩放百分比回到 100%（浏览器习惯） */
 $("zoom").addEventListener("click", () => { if (!isCanvasMode()) { view.zoom = 1; applyTransform(); } });
 $("btn-layout").addEventListener("click", tidyLayout);
