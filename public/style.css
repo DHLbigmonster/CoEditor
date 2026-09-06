@@ -239,7 +239,10 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
 .card[data-status="deprecated"]::before { background: var(--deprecated); }
 .card[data-status="deprecated"] { opacity: .45; }
 .card[data-status="deprecated"] .c-body { text-decoration: line-through; text-decoration-color: rgba(125, 122, 117, .6); }
-body.focus-active .card:not([data-status="active"]) { opacity: .14; }
+/* 历史卡片要可读：弱化但不隐形（0.14 曾让空间模式的卡片几乎不可见），悬停/选中恢复 */
+body.focus-active .card:not([data-status="active"]) { opacity: .62; }
+body.focus-active .card:not([data-status="active"]):hover,
+body.focus-active .card.selected:not([data-status="active"]) { opacity: 1; }
 body.focus-active .region:not([data-status="active"]) { opacity: .1; }
 body.focus-active #lines path:not([data-status="active"]) { opacity: .1 !important; }
 /* 连线降噪：仅悬停/选中卡片的牵引线可见 */

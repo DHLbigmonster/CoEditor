@@ -2,6 +2,7 @@
 // CoEditor MCP stdio server —— 零依赖手写 JSON-RPC 2.0
 // 接入：claude mcp add coeditor -- node /abs/path/mcp-stdio.mjs /abs/vault
 import { readFile, readdir, stat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 import { acquireStoreLock, readStore, writeStore } from './lib/store.mjs';
@@ -466,7 +467,7 @@ async function handleRequest(message) {
       return {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "coeditor", version: "0.9.2" },
+        serverInfo: { name: "coeditor", version: JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version },
       };
     }
     if (message.method === "tools/list") {

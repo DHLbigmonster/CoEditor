@@ -242,6 +242,7 @@ function zoomAt(factor, clientX, clientY) {
     const viewport = $("viewport");
     const old = view.zoom;
     // 与浏览器/PDF 阅读器一致：放大只作用于文档内容，范围放开到 50%–300%
+    state.fitFollow = false; // 手动缩放后尺寸变化不再自动重适配
     view.zoom = Math.min(3, Math.max(0.5, view.zoom * factor));
     const ratio = view.zoom / old;
     viewport.scrollLeft = (viewport.scrollLeft + clientX - viewport.getBoundingClientRect().left) * ratio - (clientX - viewport.getBoundingClientRect().left);
@@ -284,6 +285,7 @@ function fitReadWidth() {
   const prevZoom = view.zoom;
   view.zoom = 1; applyTransform();
   const natural = Math.max(page.scrollWidth, 360);
+  state.fitFollow = true; // fit 过之后，侧栏/窗口尺寸变化自动跟随重适配
   view.zoom = Math.min(3, Math.max(0.5, Math.max(320, viewport.clientWidth - chrome) / natural));
   applyTransform();
   // 公式有量测误差（padding/列间隙），直接以实际像素收敛：仍压到反馈栏就再退一档
@@ -637,6 +639,9 @@ function cardElement(annotation) {
     const move = (moveEvent) => {
       card.style.left = `${originX + (moveEvent.clientX - startX) / view.zoom}px`;
       card.style.top = `${originY + (moveEvent.clientY - startY) / view.zoom}px`;
+      // 同步内存坐标：drawLines 读的是 annotation.x/y——不同步的话引导线在拖动全程钉在旧位置
+      annotation.x = parseFloat(card.style.left);
+      annotation.y = parseFloat(card.style.top);
       drawLines();
     };
     const up = async () => {
@@ -2989,6 +2994,8 @@ $("rail-resizer").addEventListener("pointerdown", (event) => {
     $("rail-resizer").removeEventListener("pointerup", up);
     $("rail-resizer").removeEventListener("pointercancel", up);
     document.body.classList.remove("resizing-rail");
+    clearTimeout(railFitTimer);
+    railFitTimer = setTimeout(() => { if (state.fitFollow && !isCanvasMode()) fitReadWidth(); }, 180);
   };
   $("rail-resizer").addEventListener("pointermove", move);
   $("rail-resizer").addEventListener("pointerup", up);
@@ -3315,6 +3322,12 @@ async function resetDocView() {
   $("doc").innerHTML = "";
   hideSelMenu();
 }
+
+let railFitTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(railFitTimer);
+  railFitTimer = setTimeout(() => { if (state.fitFollow && !isCanvasMode()) fitReadWidth(); }, 200);
+});
 
 let polling = false;
 setInterval(async () => {
