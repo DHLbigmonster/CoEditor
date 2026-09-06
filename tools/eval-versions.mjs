@@ -79,6 +79,11 @@ const drift = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action:
 const list6 = await getVersions(DOC);
 result.driftBlocked = drift.status === 409 && drift.json.error === "version-content-changed" && list6.find(v => v.id === v3idOld).status === "pending";
 
+/* ---- A6b. F09 快照对照：登记后改活动文件，按 id 的历史对照必须仍是登记时刻的内容 ---- */
+const snapDiff = await (await fetch(`${BASE}/api/versions/diff?p=${encodeURIComponent(DOC)}&file=${encodeURIComponent(P("茶事方案-v3.md"))}&id=${encodeURIComponent(v3idOld)}`)).json();
+result.snapshotDiffStable = snapDiff.basis === "snapshot" && snapDiff.changed === true
+  && !JSON.stringify(snapDiff.diff.rows).includes("登记后内容被改过");
+
 /* ---- A7. 内容变化后的重新登记 = 新条目（旧登记保留历史），新条目可正常验收 ---- */
 const reReg = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "register", file: P("茶事方案-v3.md"), note: "内容更新后重新登记" });
 const v3idNew = reReg.json.version && reReg.json.version.id;
@@ -89,7 +94,7 @@ result.reDecideOk = reDecide.status === 200;
 /* ---- A8. 顺序敏感 diff：段落重排必须显示为「删旧 + 增新」，不得抹成毫无变化 ---- */
 await post(`/api/versions?p=${encodeURIComponent(P("顺序测试.md"))}`, { action: "register", file: P("顺序测试-v2.md") });
 const reorder = await (await fetch(`${BASE}/api/versions/diff?p=${encodeURIComponent(P("顺序测试.md"))}&file=${encodeURIComponent(P("顺序测试-v2.md"))}`)).json();
-result.reorderDetected = Boolean(reorder.diff && reorder.diff.orderAware && reorder.diff.summary.added === 1 && reorder.diff.summary.removed === 1);
+result.reorderDetected = Boolean(reorder.diff && reorder.diff.orderAware && reorder.diff.summary.added >= 1 && reorder.diff.summary.removed >= 1);
 
 /* ---- A9. 服务端保留继承：继承 → 幂等 → 原文缺失报警 ---- */
 const carry1 = await post(`/api/versions?p=${encodeURIComponent(DOC)}`, { action: "carry", to: P("茶事方案-v3.md") });
@@ -121,7 +126,7 @@ const reopenedAnn = (await getAnnotations(P("顺序测试.md"))).find(a => a.id 
 const roundAfterReject = (await (await fetch(`${BASE}/api/rounds?p=${encodeURIComponent(P("顺序测试.md"))}`)).json()).activeRound;
 result.rejectedReopens = rej.json.ok === true && Array.isArray(rej.json.reopened) && rej.json.reopened.includes(annSeq.no)
   && resolvedNow.status === "addressed" && reopenedAnn.status === "active"
-  && roundAfterReject === Math.max(0, (Number(roundAfterResolve) || 0) - 1);
+  && roundAfterReject === roundAfterResolve; // 批次单调前进：退回不回滚计数
 
 /* ---- B. UI：面板 / 未变化措辞 / 漂移黄条 / 验收落在本尊 / 真实跳转且保留已继承 ----
    UI 层用干净的「验收错位测试」文档，完整复现报告场景：

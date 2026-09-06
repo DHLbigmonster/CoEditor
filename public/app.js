@@ -9,16 +9,28 @@ const state = { path: null, text: "", mtime: 0, annotations: [], selected: null,
   arrows: [], notes: [], images: [], drafts: [], canvasTool: "select", arrowColor: "red", canvasSelected: null,
   vaultRoot: "", workspaceMode: "read" };
 
+/* 文档会话身份：每次 openDoc 递增。所有异步写入全局状态的地方都必须核对自己
+   拿到的 epoch——A 文档的迟到响应不得写进 B 文档的正文、批注或版本列表。 */
+let docEpoch = 0;
+
+/* 保存状态枚举（徽标的唯一真相源）：clean/dirty/saving/error/conflict。
+   文本驱动的旧 syncStatus 桥接到这里，新代码直接调 setSaveState。 */
+const SAVE_LABELS = { clean: "已保存到本地", dirty: "有未保存更改 · ⌘S", saving: "正在保存…", error: "未保存 · 请重试", conflict: "保存冲突 · 草稿保留" };
+function setSaveState(stateName) {
+  const badge = $("save-badge");
+  if (!badge) return;
+  badge.dataset.state = stateName === "dirty" ? "saving" : stateName;
+  badge.querySelector("i").textContent = stateName === "error" ? "×" : stateName === "clean" ? "✓" : "•";
+  badge.childNodes[badge.childNodes.length - 1].textContent = " " + (SAVE_LABELS[stateName] || stateName);
+}
 function syncStatus(text, bad = false) {
  const el = $('sync-status'); if (el) { el.textContent = text; el.dataset.error = String(bad); }
  // 顶栏常驻保存徽标：本地优先的产品承诺要一直可见，而不是藏在侧栏角落
- const badge = $('save-badge');
- if (badge) {
-   const busy = text === '正在保存…';
-   badge.dataset.state = bad ? 'error' : busy ? 'saving' : 'saved';
-   badge.querySelector('i').textContent = bad ? '×' : busy ? '•' : '✓';
-   badge.childNodes[badge.childNodes.length - 1].textContent = ' ' + text;
- }
+ if (text === "正在保存…") setSaveState("saving");
+ else if (text === "已保存到本地") setSaveState("clean");
+ else if (/冲突/.test(text)) setSaveState("conflict");
+ else if (bad) setSaveState("error");
+ else if (/未保存/.test(text)) setSaveState("dirty");
 }
 async function checkedFetch(url, options) {
  const writing = options && options.method && options.method !== 'GET';
@@ -68,9 +80,8 @@ function goToOutline(idx) {
   if (!el) return;
   document.querySelectorAll('.outline-item').forEach(node => node.classList.toggle('active', Number(node.dataset.outlineGo) === idx));
   if (!inFrame) { el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
-  const frame = $("html-frame");
-  const top = frame.getBoundingClientRect().top + window.scrollY + el.getBoundingClientRect().top - 84;
-  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  // iframe 自适应高度、无内部滚动：scrollIntoView 会沿祖先链滚到外层容器（与 md 路径同一行为）
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 let feedbackFilter = 'pending';
 /* 版本对照状态（feedbackTabs 与渲染共用；选中记 id 不记序号——序号会随新增版本移位） */
@@ -100,12 +111,16 @@ async function ensureRenderedDiff(active) {
   if (versionState.rendered && versionState.rendered.key === key) return;
   versionState.rendered = { key, left: null, right: null };
   try {
+    // 有快照读快照（登记那一刻的字节）：活动文件后来怎么改都偷换不了历史对照
+    const snap = active.snapshot || null;
     const [orig, next] = await Promise.all([
-      (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json(),
-      (await fetch(`/api/doc?p=${encodeURIComponent(active.file)}`)).json(),
+      snap && snap.source ? (await fetch(`/api/raw?p=${encodeURIComponent(snap.source)}`)).text()
+        : (await fetch(`/api/doc?p=${encodeURIComponent(state.path)}`)).json().then(d => d.text || ""),
+      snap && snap.next ? (await fetch(`/api/raw?p=${encodeURIComponent(snap.next)}`)).text()
+        : (await fetch(`/api/doc?p=${encodeURIComponent(active.file)}`)).json().then(d => d.text || ""),
     ]);
-    versionState.rendered.left = renderSourceDoc(orig.text || "", state.path);
-    versionState.rendered.right = renderSourceDoc(next.text || "", active.file);
+    versionState.rendered.left = renderSourceDoc(orig, state.path);
+    versionState.rendered.right = renderSourceDoc(next, active.file);
   } catch { versionState.rendered = { key, left: null, right: null }; }
   const shell = document.querySelector("#cards .version-panel, #drawer-body .version-panel");
   if (shell) paintVersions(shell);
@@ -642,7 +657,7 @@ function cardElement(annotation) {
         : act === "deprecated" ? { status: "deprecated", weight: 0 }
         : { status: "active", weight: 1 };
       await patch(annotation.id, { ...next, event: act });
-      await loadAnnotations();
+      await loadAnnotations({ rerender: false });
     });
   });
   return card;
@@ -674,7 +689,8 @@ function renderCards() {
         + '</div>'
       : '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
     if (railTab === 'outline') { renderOutline(host); return; }
-    host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs());
+    // PDF/图片分支的 innerHTML 已含反馈头部，不能再追加一次（v1.2.1 静态回归）
+    if (outlineAvailable) host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs());
   }
   const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
   if (!isCanvasMode() && feedbackFilter === 'versions') { renderVersions(host); return; }
@@ -813,9 +829,13 @@ function reportHtml(report) {
   if (report.responded) parts.push(`回应了 ${report.responded} 条反馈`);
   if (report.retained) {
     if (report.retained.total === 0) parts.push('本轮没有生效中的保留要求');
-    else if (report.retained.missing > 0) parts.push(`⚠ ${report.retained.missing}/${report.retained.total} 处保留内容在新稿中未找到，待确认`);
-    else parts.push(`${report.retained.ok} 处保留内容未改动`);
+    else {
+      if (report.retained.missing > 0) parts.push(`⚠ ${report.retained.missing}/${report.retained.total} 处保留内容在新稿中未找到，待确认`);
+      if (report.retained.ambiguous > 0) parts.push(`${report.retained.ambiguous} 处保留内容多处出现，待确认`);
+      if (report.retained.ok > 0) parts.push(`${report.retained.ok} 处保留内容未改动`);
+    }
   }
+  if (report.basis === 'live') parts.push('此版本没有快照，对照基于当前文件');
   return parts.length ? `<div class="vp-report">${parts.map(escapeHtml).join(' · ')}</div>` : '';
 }
 
@@ -880,7 +900,7 @@ async function loadDiff(shell) {
     const data = await res.json();
     versionState.diff = data.diff || null;
     versionState.diffChanged = data.changed === true;
-    versionState.report = { responded: data.responded || 0, retained: data.retained || null };
+    versionState.report = { responded: data.responded || 0, retained: data.retained || null, basis: data.basis };
   } catch { versionState.diff = null; versionState.diffChanged = null; versionState.report = null; }
   versionState.loading = false;
   paintVersions(shell);
@@ -930,7 +950,7 @@ function startCardEdit(card, annotation) {
     save.addEventListener("click", async (event) => {
       event.stopPropagation();
       await patch(annotation.id, { body: ta.value.trim(), event: "edited" });
-      await loadAnnotations();
+      await loadAnnotations({ rerender: false });
       toast("批注已更新");
     });
     cancel.addEventListener("click", async (event) => { event.stopPropagation(); await loadAnnotations(); });
@@ -2022,17 +2042,21 @@ async function renderDocument() {
   host.innerHTML = renderMarkdown(state.text);
 }
 
-async function loadAnnotations() {
+/* rerender=false：只刷新批注数据与卡片（批注增删改后用），不重建整份文档——
+   否则改一条批注就要重开 PDF/重建 iframe，打断选择、跳位置、放大卡顿。 */
+async function loadAnnotations({ rerender = true } = {}) {
   if (!state.path) return;
+  const epoch = docEpoch;
   const [res, roundRes] = await Promise.all([
     checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`),
     checkedFetch(`/api/rounds?p=${encodeURIComponent(state.path)}`),
   ]);
+  if (epoch !== docEpoch) return;
   const data = await res.json();
   state.annotations = data.annotations || [];
   state.revision = data.revision || 0;
   if (roundRes.ok) state.round = (await roundRes.json()).activeRound ?? 0;
-  await renderDocument();
+  if (rerender) await renderDocument();
   const decayed = state.mode === "image" ? 0 : await anchorAll();
   renderRegions();
   bindImageSelection();
@@ -2047,9 +2071,11 @@ async function loadAnnotations() {
   renderCards();
   applyTransform();
   // 版本数轻量预取：让「版本对照」Tab 一开始就显示真实数量，而不是打开过后才正确
+  const prefetchEpoch = epoch;
   fetch(`/api/versions?p=${encodeURIComponent(state.path)}`)
     .then(r => r.json())
     .then(d => {
+      if (prefetchEpoch !== docEpoch) return; // 已切走：旧文档的版本列表不得覆盖当前面板
       versionState.list = d.versions || [];
       const tab = document.querySelector('[data-feedback="versions"] b');
       if (tab) tab.textContent = versionState.list.length;
@@ -2064,16 +2090,20 @@ async function loadAnnotations() {
   if (decayed > 0) toast(decayed + ' 条反馈暂时找不到原文，要求已保留，请检查定位');
 }
 
+/* 文档会话身份：每次 openDoc 递增。所有异步写入全局状态的地方都必须核对自己
+   拿到的 epoch——A 文档的迟到响应不得写进 B 文档的正文、批注或版本列表。 */
 async function openDoc(path, { push = true } = {}) {
   if (!canLeaveEditor()) return;
   if (editSession) leaveEditUi();
   feedbackFilter = 'pending';
+  const epoch = ++docEpoch;
   state.path = path;
   state.mode = kindOf(path);
   if (state.workspaceMode === "edit") state.workspaceMode = "read";
   syncWorkspaceModeUi();
   if (push) history.pushState({ doc: path }, "", `?doc=${encodeURIComponent(path)}`);
   const response = await fetch(`/api/doc?p=${encodeURIComponent(path)}`);
+  if (epoch !== docEpoch) return; // 用户已切走：这次响应整体作废
   if (response.ok) {
     const data = await response.json();
     state.text = data.text;
@@ -2680,21 +2710,33 @@ function enterEditMode() {
 
 async function saveEdit() {
   if (!editSession) return;
+  const epoch = docEpoch;
+  const submittedText = editSession.cm.getValue(); // 提交的是此刻的文本；期间的新输入属于下一次保存
+  syncStatus("正在保存…");
   const res = await fetch(`/api/write?p=${encodeURIComponent(state.path)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: editSession.cm.getValue(), baseMtime: editSession.baseMtime }),
+    body: JSON.stringify({ text: submittedText, baseMtime: editSession.baseMtime }),
   });
+  if (epoch !== docEpoch) { toast("已保存原文件 · 你已切换到其他文档"); return; }
   if (res.status === 409) {
     toast("文件已被外部修改，请「返回阅读」后重新进入编辑");
     syncStatus('保存冲突 · 草稿仍保留', true);
     // Do not adopt the external mtime without loading/merging its new source.
     return;
   }
-  if (!res.ok) { toast("保存失败： " + (await res.json().catch(() => ({}))).error); return; }
+  if (!res.ok) { toast("保存失败： " + (await res.json().catch(() => ({}))).error); syncStatus("未保存 · 请重试", true); return; }
   const data = await res.json();
   state.mtime = data.mtime;
-  state.text = editSession.cm.getValue(); // 同步内存文本，loadAnnotations 重渲染才用新内容
+  editSession.baseMtime = data.mtime; // 提交成功后以新 mtime 为基准，继续输入再保存不会被误判冲突
+  if (editSession.cm.getValue() !== submittedText) {
+    // 保存请求在飞行中时用户又打了字：盘上是提交的版本，编辑器里还有新草稿——不能宣布全部已保存
+    state.text = submittedText;
+    setSaveState("dirty");
+    toast("已保存 · 保存期间还有新输入，再按 ⌘S 提交剩余修改");
+    return;
+  }
+  state.text = submittedText; // 同步内存文本，loadAnnotations 重渲染才用新内容
   syncStatus("已保存到本地");
   toast("已保存，批注正在重新锚定");
   leaveEditUi();
@@ -2979,7 +3021,7 @@ $("drawer-body").addEventListener("click", async (event) => {
       method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: item.id }),
     });
     if (!res.ok) return toast("删除失败，批注未改变");
-    await loadAnnotations();
+    await loadAnnotations({ rerender: false });
     renderDrawer();
     toast(item.kind === "highlight" ? "已取消保留" : "批注已删除（写前备份已保留）");
     return;

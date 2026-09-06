@@ -2,8 +2,9 @@
 import WebSocket from "/Users/chaos/.workbuddy/binaries/node/workspace/node_modules/ws/index.js";
 
 const BASE = process.env.COEDITOR_E2E_BASE || "http://127.0.0.1:4401";
-const VAULT = process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery";
-const AWAY = process.env.COEDITOR_E2E_AWAY || "/tmp/coeditor-battery-away";
+import { realpath } from "node:fs/promises";
+const VAULT = await realpath(process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery").catch(e => process.env.COEDITOR_E2E_COPY || "/tmp/coeditor-battery"); // 服务按真实路径记录（macOS /var→/private/var），比对同基
+const AWAY = await realpath(process.env.COEDITOR_E2E_AWAY || "/tmp/coeditor-battery-away").catch(e => process.env.COEDITOR_E2E_AWAY || "/tmp/coeditor-battery-away");
 const api = async (url, options = {}) => {
   const response = await fetch(`${BASE}${url}`, options);
   return { status: response.status, json: await response.json().catch(() => ({})) };

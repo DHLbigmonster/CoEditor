@@ -59,10 +59,12 @@ const server = spawn(process.execPath, [path.join(ROOT, "server.mjs"), VAULT], {
   stdio: "ignore",
 });
 let ready = false;
+const { realpath } = await import('node:fs/promises');
+const vaultReal = await realpath(VAULT).catch(() => VAULT); // 服务如实返回真实路径（macOS /var→/private/var），比对也用真实路径
 for (let i = 0; i < 30; i += 1) {
   try {
     const tree = await (await fetch(`${BASE}/api/tree`)).json();
-    if (tree.root === VAULT) { ready = true; break; } // 必须是「我们的」服务：端口残留实例的 root 不符
+    if (tree.root === vaultReal) { ready = true; break; } // 必须是「我们的」服务：端口残留实例的 root 不符
   } catch { await sleep(300); }
 }
 if (!ready) { console.error(`❌ 隔离服务启动失败（端口 ${PORT} 被其他实例占用或 root 不符）`); server.kill(); process.exit(2); }

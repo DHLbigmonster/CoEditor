@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 
 import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
-import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf, reopenResolvedAnnotations } from './lib/review.mjs';
+import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf, reopenResolvedAnnotations, lastResolvedNos, retainedHealth } from './lib/review.mjs';
 import { listVersions, registerVersion, setVersionStatus, textDiff, versionIdOf, prepareVersionRegistration, carryRetainedAnnotations } from './lib/version.mjs';
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 let requestQueue = Promise.resolve();
@@ -45,6 +45,9 @@ const execFileAsync = promisify(execFile);
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "public");
 let ROOT = resolve(process.argv[2] || process.cwd());
+// ROOT 归一化到真实路径：macOS 的 /var/folders 是 /private/var/folders 的 symlink，
+// 不归一化的话 safeResolveReal 的前缀比较会把自家文件当越界拒绝
+try { ROOT = await realpath(ROOT); } catch { /* 目录不存在时保持词法路径，让后续 stat 报错 */ }
 const PORT = Number(process.env.COEDITOR_PORT || 4400);
 let SIDECAR = join(ROOT, ".marginalia", "annotations.json");
 // 跨 vault 的全局状态（最近打开的目录）。默认 ~/.coeditor；
@@ -53,8 +56,8 @@ const STATE_DIR = process.env.COEDITOR_STATE_DIR || join(homedir(), ".coeditor")
 const RECENT_FILE = join(STATE_DIR, "recent-vaults.json");
 const RECENT_MAX = 8;
 
-function setVault(next) {
-  ROOT = next;
+async function setVault(next) {
+  ROOT = await realpath(next).catch(() => resolve(next));
   SIDECAR = join(ROOT, ".marginalia", "annotations.json");
   UISTATE = join(ROOT, ".marginalia", "ui-state.json");
 }
@@ -80,6 +83,25 @@ function safeResolve(relPath) {
   const target = resolve(ROOT, relPath || "");
   if (target !== ROOT && !target.startsWith(ROOT + sep)) return null;
   return target;
+}
+
+/* 真实路径边界：词法前缀挡不住 symlink。对已存在的部分做 realpath 再拼回剩余段，
+   拼出的绝对路径必须仍在 vault 内。写文件的入口一律用这个，不用词法版。 */
+async function safeResolveReal(relPath) {
+  const target = safeResolve(relPath);
+  if (!target) return null;
+  let probe = target;
+  for (;;) {
+    const real = await realpath(probe).catch(() => null);
+    if (real) {
+      const tail = relative(probe, target);
+      const resolved = tail ? join(real, tail) : real;
+      return resolved === ROOT || resolved.startsWith(ROOT + sep) ? resolved : null;
+    }
+    const parent = dirname(probe);
+    if (parent === probe) return null; // 到根都不存在，无法建立真实边界
+    probe = parent;
+  }
 }
 
 /* ---------- 最近打开的目录：全局记录，切 vault 与启动时各记一次 ---------- */
@@ -257,15 +279,9 @@ const requestHandler = async (req, res) => {
           try {
             const status = body.status === 'rejected' ? 'rejected' : 'accepted';
             const entry = setVersionStatus(data, doc, id, status, { expectHash: currentHash });
-            // 退回 = 否决 Agent 的「已处理」声明：批注重回待处理，批次也退回登记前的那一轮
-            let reopened = [];
-            if (status === 'rejected') {
-              reopened = reopenResolvedAnnotations(data, doc);
-              if (reopened.length) {
-                data.docRounds ||= {};
-                data.docRounds[doc] = Math.max(0, (Number(entry.round) || 0) - 1);
-              }
-            }
+            // 退回 = 否决「本次 Agent 回应记录」里的那批批注（不是全部历史、也不是按轮次猜）；
+            // 没有回应记录就退回 = 只改版本状态。批次计数单调前进，不随审阅操作回滚。
+            const reopened = status === 'rejected' ? reopenResolvedAnnotations(data, doc, lastResolvedNos(data, doc)) : [];
             await writeSidecar(data);
             return send(200, JSON.stringify({ ok: true, version: entry, reopened }));
           } catch (error) {
@@ -292,7 +308,8 @@ const requestHandler = async (req, res) => {
       }
     }
 
-    // 版本对照：原文 vs 新版本（段落级、保留顺序），回答「这一轮改了哪里」
+    // 版本对照：回答「这一轮改了哪里」。有快照的版本一律读登记时刻的字节，
+    // 活动文件后来怎么改都不能偷换历史对照的基准；活动文件与快照的差异单独如实上报。
     if (url.pathname === '/api/versions/diff') {
       const doc = url.searchParams.get('p');
       const file = url.searchParams.get('file');
@@ -307,24 +324,36 @@ const requestHandler = async (req, res) => {
         if (BINARY_EXT.has(extension) || IMAGE_EXT.has(extension)) {
           return send(200, JSON.stringify({ doc, file, binary: true, diff: null }));
         }
-        const original = await readFile(originalPath, 'utf8');
-        const next = await readFile(versionPath, 'utf8');
         const data = await readSidecar();
+        const entry = versionId ? listVersions(data, doc).find(item => item.id === versionId) : null;
+        const isHtml = /\.(html?|xhtml)$/i.test(file);
+        let original, next;
+        let basis = 'live'; // 无快照的旧条目回退读活动文件（如实标注）
         let changed = null;
-        if (versionId) {
-          const entry = listVersions(data, doc).find(item => item.id === versionId);
+        if (entry && entry.snapshot && entry.snapshot.source && entry.snapshot.next) {
+          const snapSource = safeResolve(entry.snapshot.source);
+          const snapNext = safeResolve(entry.snapshot.next);
+          if (snapSource && snapNext) {
+            original = await readFile(snapSource, 'utf8');
+            next = await readFile(snapNext, 'utf8');
+            basis = 'snapshot';
+            const currentNextHash = createHash('sha256').update(await readFile(versionPath)).digest('hex');
+            changed = entry.nextHash ? currentNextHash !== entry.nextHash : null;
+          }
+        }
+        if (original === undefined) {
+          original = await readFile(originalPath, 'utf8');
+          next = await readFile(versionPath, 'utf8');
           if (entry && entry.nextHash) changed = createHash('sha256').update(next).digest('hex') !== entry.nextHash;
         }
-        // 回应汇总：这一轮 Agent 处理了几条反馈、保留要求在新稿里是否还完好
-        const annotations = data.docs[doc] || [];
-        const round = currentRound(data, doc);
-        const responded = annotations.filter(a => a.kind !== 'highlight' && a.status === 'addressed' && (Number.isFinite(a.round) ? a.round : 0) === round).length;
-        const retainedList = annotations.filter(a => a.kind === 'highlight' && a.status === 'active');
-        const retainedOk = retainedList.filter(a => offsetsOf(next, a.quote, a.prefix)).length;
+        // 回应汇总：按「最近一次 Agent 回应记录」取数——批次推进后按 round 过滤会假报 0
+        const responded = lastResolvedNos(data, doc).length;
+        const retained = retainedHealth(data, doc, next, isHtml);
         return send(200, JSON.stringify({
-          doc, file, changed, diff: textDiff(original, next),
+          doc, file, changed, basis,
+          diff: textDiff(original, next),
           responded,
-          retained: { total: retainedList.length, ok: retainedOk, missing: retainedList.length - retainedOk },
+          retained: { total: retained.total, ok: retained.ok, missing: retained.missing, ambiguous: retained.ambiguous, missingNos: retained.missingNos },
         }));
       } catch (error) {
         return send(400, JSON.stringify({ error: String(error && error.message || error) }));
@@ -357,12 +386,15 @@ const requestHandler = async (req, res) => {
     /* ---------- 编辑写回：文本文件保存（VSCode 式编辑态） ---------- */
     if (url.pathname.startsWith("/api/write")) {
       const body = await readJson(req);
-      const target = safeResolve(url.searchParams.get("p") || body.p);
+      const target = await safeResolveReal(url.searchParams.get("p") || body.p);
       if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
       if (!TEXT_EXT.has(extname(target).toLowerCase())) return send(400, JSON.stringify({ error: "unsupported extension" }));
       if (typeof body.text !== "string") return send(400, JSON.stringify({ error: "text required" }));
+      // baseMtime 是普通更新的必要前置：没有它就没有冲突保护，静默省略不得绕过
       const info = await stat(target).catch(() => null);
-      if (info && Number.isFinite(body.baseMtime) && info.mtimeMs !== body.baseMtime) {
+      if (!info) return send(400, JSON.stringify({ error: "file not found" }));
+      if (!Number.isFinite(body.baseMtime)) return send(400, JSON.stringify({ error: "baseMtime required" }));
+      if (info.mtimeMs !== body.baseMtime) {
         return send(409, JSON.stringify({ error: "file-changed-externally", mtime: info.mtimeMs }));
       }
       if (info) {
@@ -388,7 +420,7 @@ const requestHandler = async (req, res) => {
       if (!clean) return send(400, JSON.stringify({ error: "invalid name" }));
       const rel = /\.(md|markdown|txt|html?)$/i.test(clean) ? clean : `${clean}${wantedExt}`;
       if (!TEXT_EXT.has(extname(rel).toLowerCase())) return send(400, JSON.stringify({ error: "unsupported extension" }));
-      const target = safeResolve(rel);
+      const target = await safeResolveReal(rel);
       if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
       const baseName = (rel.split("/").pop() || "未命名").replace(/\.[^.]+$/, "");
       const content = /\.html?$/i.test(rel)
@@ -418,12 +450,12 @@ const requestHandler = async (req, res) => {
         .join("/");
       if (!clean) return send(400, JSON.stringify({ error: "invalid name" }));
       const base = clean.replace(/\.(md|markdown)$/i, "");
-      const dir = safeResolve(`${base}.md`);
+      const dir = await safeResolveReal(`${base}.md`);
       if (!dir) return send(400, JSON.stringify({ error: "invalid path" }));
       await mkdir(dirname(dir), { recursive: true });
       for (let n = 1; n <= 200; n += 1) {
         const rel = `${base}${n === 1 ? "" : `-${n}`}.md`;
-        const target = safeResolve(rel);
+        const target = await safeResolveReal(rel);
         if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
         try {
           await writeFile(target, text, { flag: "wx" }); // 已存在则抛 EEXIST，换下一个序号
@@ -471,8 +503,8 @@ const requestHandler = async (req, res) => {
       const next = resolve(String(body.path || "").trim());
       const info = await stat(next).catch(() => null);
       if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
-      setVault(next);
-      await noteRecent(next);
+      await setVault(next); // 先完成真实路径切换再响应，避免响应后短暂窗口内请求打到旧 ROOT
+      await noteRecent(ROOT); // 记录归一化后的路径：与启动记录同基，去重才不会出现同目录两条
       return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
     }
 

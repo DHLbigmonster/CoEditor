@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.2.0 · 2026-09-05
+> 最后更新：v1.3.0 · 2026-09-06
 
 ## 产品一句话
 
@@ -46,7 +46,11 @@
 23. **版本对照数据**：diff 响应自带 `responded`（本轮 Agent 处理数）与 `retained {total, ok, missing}`（服务端逐条核对新稿原文）；前端 `sideBySide` 视图是默认形态（相邻删旧×增新配对成左右两列），`rows` 是逐段备选。改 textDiff 输出结构时两个视图都要验证。
 25. **右栏双层视图**：「大纲 | 反馈」是右栏第一层（`railTab`），待处理/保留/历史/版本对照是反馈视图内的第二层（`feedbackFilter`）。大纲视图下反馈 tab 不渲染是有意设计——任何切回反馈的代码必须先点 `[data-rail-tab="feedback"]`（eval-versions 的 openVersionsTab 是范例）。
 26. **排版并排**：版本对照 `sideMode='render'` 时用禁脚本 iframe（`sandbox=""`）展示 renderMarkdown/原始 HTML；srcdoc 在 paintVersions 渲染完成后对占位 iframe 赋值（不能内嵌进 innerHTML）。改 renderMarkdown 或 buildHtmlCoedit 时，排版并排会跟着变——两处都要验证。
-27. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
+27. **保留校验与定位分离**：`offsetsOf` 只是模糊定位建议（prefix 兜底/前 12 字），**永远不能当「保留未改动」的证明**；校验走 `verifyRetainedText`（intact/missing/ambiguous/unverified），只有完整原文精确存在一次才算通过。HTML 源串匹配不校验，标 unverified。
+28. **回应与退回的归属**：「回应了 N 条」和退回重开都看 `lastResolvedNos`（roundHistory 里最近一次 agent-resolved 的 resolved 列表），**不能按 currentRound 过滤**（推进后会假报 0），也**不能全量重开 addressed**（会翻出无关历史）。批次计数单调前进，退回不回滚 docRounds。
+29. **版本对照读快照**：有 snapshot 的版本，diff 与排版并排都读登记时刻的字节（`basis:'snapshot'`）；活动文件与快照的差异走 `changed` 单独上报。登记的哈希与快照来自同一次读取。幂等身份含 sourceHash。
+30. **ROOT 是真实路径**：启动/setVault 都做 realpath 归一化（macOS /var→/private/var）；写入口（write/create-file/save-brief）走 `safeResolveReal`（symlink 越界拒绝）；`/api/write` 的 baseMtime 必填。**新测试比对 root 时必须用 realpath 同基**（run-battery/eval-recent 有范例）。
+31. **色板纪律**：主题强调色是近黑 `#0d0d0d`（ChatGPT 式中性），彩色只用于功能语义——保留=黄底、成功/已处理=绿 `#10a37f`、错误=`#d64545`、过期=暗金。**不要再引入橘色或大面积品牌色**（用户明确否决过「小清新橘」）。新增 UI 一律走 `var(--active/--ink/--line)`，少写硬编码色。
 
 ## 测试电池（发布门禁）
 
