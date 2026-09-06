@@ -140,7 +140,7 @@ body.rail-hidden #rail { margin-left: -264px; }
   background: var(--paper);
   color: var(--paper-ink);
   border-radius: 6px;
-  box-shadow: 0 30px 70px rgba(8, 6, 3, .55), 0 4px 14px rgba(8, 6, 3, .3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 10px 32px rgba(0, 0, 0, .10); /* U05：大扩散深阴影在浅底上呈黑竖带，柔化为低对比 */
 }
 body.paper-dark #page { background: #201d17; color: #d8d4cd; box-shadow: 0 30px 70px rgba(8,6,3,.55); }
 
@@ -178,8 +178,7 @@ body.paper-dark #doc code { background: #2b2720; }
 body.paper-dark #doc pre { background: #181510; }
 
 .anchor {
-  background: rgba(13, 13, 13, .16);
-  box-shadow: inset 0 -2px 0 rgba(13, 13, 13, .75);
+  background: rgba(13, 13, 13, .07);
   border-radius: 2px; cursor: pointer;
 }
 /* 悬停互链：批注卡 ↔ 正文。描边而非改底色，避免与保留(黄)/删除线/已处理(绿)的语义色混淆 */
@@ -192,9 +191,9 @@ body.paper-dark #doc pre { background: #181510; }
 
 /* 高亮 / 删除线标记（mark 型批注） */
 .anchor[data-kind="highlight"] {
-  background: rgba(244, 214, 74, .42);
+  background: rgba(246, 211, 91, .38);
   box-shadow: none;
-  border-radius: 3px; padding: 1px 0;
+  border-radius: 3px; /* 保留 = 柔和半透明底色：无边框、无底线、无 padding，不改行内盒尺寸 */
 }
 body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, .28); }
 .anchor[data-kind="strike"] {
@@ -204,9 +203,9 @@ body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, 
   text-decoration-color: rgba(224, 96, 79, .85);
   text-decoration-thickness: 2px;
 }
-.anchor[data-status="addressed"] { background: rgba(125, 171, 96, .16); box-shadow: inset 0 -2px 0 rgba(125, 171, 96, .75); }
-.anchor[data-status="stale"] { background: rgba(207, 160, 73, .16); box-shadow: inset 0 -2px 0 rgba(207, 160, 73, .75); }
-.anchor[data-status="deprecated"] { background: transparent; box-shadow: inset 0 -1px 0 var(--deprecated); text-decoration: line-through; text-decoration-color: rgba(125, 122, 117, .5); }
+.anchor[data-status="addressed"]:not([data-kind="highlight"]) { background: rgba(125, 171, 96, .14); box-shadow: none; }
+.anchor[data-status="stale"]:not([data-kind="highlight"]) { background: rgba(207, 160, 73, .14); box-shadow: none; }
+.anchor[data-status="deprecated"]:not([data-kind="highlight"]) { background: rgba(125, 122, 117, .08); box-shadow: none; text-decoration: none; }
 .anchor.flash { animation: flash 1.1s ease; }
 @keyframes flash { 0%, 100% { background: rgba(13, 13, 13, .16); } 35% { background: rgba(13, 13, 13, .5); } }
 
@@ -1337,18 +1336,20 @@ body[data-workspace-mode="read"] #viewport { overflow: auto; }
 /* 文本文档（md/txt/docx/html）阅读模式：引导线坐标体系随固定侧栏失效，
    SVG 层由 drawLines 早退隐藏（12000px 画布会把 overflow:auto 的正文区撑出假横滚）。
    图片/PDF/画布的引导线保留 */
-/* 右栏固定为窗口侧栏（像 PDF 阅读器）：横向缩放滚动时永远钉在右缘，不被内容顶走；
-   文档区通过 world 的右内边距给它让位 */
-body[data-workspace-mode="read"]:not(.cards-hidden) #world { padding-right: 340px; }
+/* ---------- U01 · 真双栏：反馈栏是布局同级右栏，不覆盖正文 ----------
+   #work-row（flex 行）= #viewport（正文区，min-width:0，自己的滚动容器）+ #cards。
+   放大的纸面只会在 #viewport 内部滚动，永远不可能穿入反馈栏。 */
+#work-row { display: flex; flex: 1; min-height: 0; position: relative; }
 body[data-workspace-mode="read"] #cards {
-  position: fixed; left: auto; right: 18px; top: 104px; z-index: 9; /* 必须低于 #bar(z10)：下拉菜单(面板 z80)随 bar 的 stacking context 对外只有 10 */ /* left:auto：覆盖画布规则的 left:0，否则 left 优先把侧栏钉在左上角 */
-  width: 292px;
-  max-height: calc(100vh - 148px); overflow-y: auto;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .07);
-  border-radius: 12px; padding: 4px 6px 12px;
+  position: static; flex: 0 0 300px; width: 300px;
+  overflow-y: auto; max-height: none;
+  margin: 0; padding: 10px 10px 40px;
+  background: var(--panel);
+  box-shadow: inset 1px 0 0 var(--line);
 }
 /* 右栏折叠：阅读/编辑模式生效；画布的批注卡是世界坐标元素，不受此开关影响 */
 body.cards-hidden:not([data-workspace-mode="canvas"]) #cards { display: none !important; }
+body[data-workspace-mode="canvas"].cards-hidden #cards { display: none !important; }
 #btn-cards[aria-pressed="true"] { color: var(--ink); background: rgba(0, 0, 0, .06); }
 /* 点击缩放百分比重置 100% 的可点击暗示 */
 body:not([data-workspace-mode="canvas"]) #zoom { cursor: zoom-out; }
@@ -1392,3 +1393,39 @@ body[data-workspace-mode="read"] #page:has(.html-view) { max-width: none; }
   background: rgba(201, 149, 55, .12); border: 1px solid rgba(201, 149, 55, .3);
   font-size: 12.5px; line-height: 1.7; color: #6d5511; max-width: 848px;
 }
+
+/* ---------- U04 · 阅读反馈栏紧凑列表 ----------
+   正文优先：去大卡片边框/阴影/厚底，编号次要，引用两行可展开；操作主次分组 */
+body[data-workspace-mode="read"] #cards .card {
+  position: static !important; left: auto !important; top: auto !important;
+  width: auto; margin: 0; padding: 10px 6px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; box-shadow: none;
+}
+body[data-workspace-mode="read"] #cards .card.selected {
+  background: rgba(13, 13, 13, .045);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+body[data-workspace-mode="read"] #cards .card .c-body {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 12.5px;
+}
+body[data-workspace-mode="read"] #cards .card .c-quote {
+  max-height: 2.6em; overflow: hidden; cursor: pointer; position: relative;
+}
+body[data-workspace-mode="read"] #cards .card.quote-open .c-quote { max-height: none; }
+body[data-workspace-mode="read"] #cards .card .c-actions { opacity: 1; }
+body[data-workspace-mode="read"] #cards .card .c-actions button {
+  padding: 3px 8px; font-size: 11px;
+}
+.c-more { position: relative; display: inline-block; }
+.c-more > summary { list-style: none; cursor: pointer; padding: 3px 7px; border-radius: 6px; color: var(--ink-dim); font-size: 12px; }
+.c-more > summary::-webkit-details-marker { display: none; }
+.c-more > summary:hover { background: rgba(0, 0, 0, .05); }
+.c-more > div {
+  position: absolute; right: 0; top: 100%; z-index: 20; min-width: 96px;
+  background: var(--panel-2, #fff); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12); padding: 4px; display: flex; flex-direction: column;
+}
+.c-more button { border: 0; background: transparent; text-align: left; padding: 6px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; color: var(--ink); }
+.c-more button:hover { background: rgba(0, 0, 0, .05); }

@@ -18,7 +18,7 @@
 .feedback-tabs b { font-size:10px; font-weight:500; margin-left:3px; }
 .feedback-tabs button:focus-visible { outline:2px solid #bb6e56; outline-offset:2px; }
 .feedback-empty { font-size:12px; line-height:1.9; color:#6c7166; padding:12px 6px; }
-body[data-workspace-mode="read"] #cards { flex-basis:286px; margin-top:30px; padding:0 0 45px; }
+/* read 反馈栏布局已并入 style.css（U01 真双栏） */
 body[data-workspace-mode="read"] #cards .card { width:100%; border:1px solid #e2e3da; border-radius:10px; box-shadow:0 3px 9px #34382d06; background:#fffefb; padding:16px; margin-bottom:12px; }
 body[data-workspace-mode="read"] #cards .card.selected { border-color:#b98570; box-shadow:0 2px 9px #a57b5e0d; }
 body[data-workspace-mode="read"] #cards .c-actions { opacity:1; }

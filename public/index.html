@@ -46,8 +46,8 @@
         <button data-workspace-mode="canvas" title="用于图片、箭头和新旧稿的空间排布；普通阅读不需要">空间批注</button>
       </span>
       <span id="save-badge" role="status" title="文档保存在本机目录，CoEditor 不上传任何内容"><i>✓</i>已保存到本地</span>
-      <button id="btn-cards" class="chip" aria-pressed="false" title="显示/隐藏右侧反馈栏（隐藏后批注走「批注」抽屉）">反馈栏</button>
-      <button id="btn-drawer" class="chip">批注</button>
+      <button id="btn-cards" class="chip" aria-pressed="false" title="打开/收起反馈面板（窄屏时以抽屉呈现）">反馈</button>
+      <button id="btn-drawer" class="chip" hidden aria-hidden="true" tabindex="-1">批注</button> <!-- U04：入口已并入「反馈」；保留元素供旧脚本兼容 -->
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <span class="divider"></span>
       <span id="bar-pdf-cols" class="seg" hidden title="PDF 页面布局：单列 / 双列 / 三列">
@@ -75,6 +75,7 @@
     </div>
   </header>
 
+  <div id="work-row">
   <div id="viewport">
     <div id="world">
       <div id="page"><article id="doc"></article></div>
@@ -83,7 +84,6 @@
       <div id="images-layer"></div>
       <div id="drafts-layer"></div>
       <div id="notes-layer"></div>
-      <div id="cards"></div>
     </div>
     <div id="toolbox">
       <button class="tool active" data-tool="select" title="选择 / 平移 (V)">
@@ -139,6 +139,8 @@
         </table>
       </div>
     </div>
+  </div>
+  <aside id="cards" aria-label="文档反馈"></aside>
   </div>
 </main>
 

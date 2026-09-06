@@ -45,7 +45,15 @@ window.addEventListener('unhandledrejection', event => { syncStatus('操作未�
 function hasDraft() { return editSession && editSession.cm.getValue() !== editSession.originalText; }
 function canLeaveEditor() { return !hasDraft() || window.confirm('当前文字还没有保存。确定放弃这些修改吗？'); }
 window.addEventListener('beforeunload', event => { if (hasDraft()) { event.preventDefault(); event.returnValue = ''; } });
-function feedbackGroup(item) { return item.status === 'active' ? item.kind === 'highlight' ? 'retained' : 'pending' : item.status === 'stale' ? 'pending' : 'history'; }
+/* U03 统一视图模型：待处理/保留/历史三组的唯一定义（顶部计数、侧栏计数、列表筛选共用）。
+   保留（highlight）的意图独立于锚点与轮次状态：只有用户取消（deprecated）才离开保留组；
+   锚点丢失 = 保留组内「待定位」，要求仍有效——不得归入待处理，也不得谎称已验证。
+   普通批注 stale = 需要人工重看，归入待处理。 */
+function feedbackGroup(item) {
+  if (item.kind === "highlight") return item.status === "deprecated" ? "history" : "retained";
+  if (item.status === "active" || item.status === "stale") return "pending";
+  return "history";
+}
 let railTab = 'feedback'; // 右栏两个视图：大纲（标题导航）/ 反馈（批注分类）
 
 /* 大纲：从渲染结果提取 h1-h3（md 在 #doc，HTML 在预览 iframe 里），点击滚到对应位置 */
@@ -288,7 +296,7 @@ function updatePaperWidth() {
   if (state.mode === "pdf" || document.querySelector("#page .html-view")) return; // PDF/html 各有自适应
   const viewport = $("viewport");
   const cardsVisible = !document.body.classList.contains("cards-hidden") && window.innerWidth > 1180;
-  const avail = Math.max(360, viewport.clientWidth - (cardsVisible ? 340 : 0) - 58); // 反馈栏让位 + 文档内边距
+  const avail = Math.max(360, viewport.clientWidth - 58); // 文档内边距（反馈栏是布局同级列，viewport 已被压缩）
   document.documentElement.style.setProperty("--paper-w", `${Math.min(820, avail)}px`);
 }
 
@@ -594,17 +602,28 @@ function cardElement(annotation) {
     return other && other.status === "active";
   });
   const KIND_BADGE = { highlight: '<span class="c-kind hl">保留</span>', strike: '<span class="c-kind st">删除线</span>', region: '<span class="c-kind rg">区域</span>' };
+  // U03：保留的锚点丢失 = 「待定位」（要求仍有效），与普通批注的「已过期」语义分开
+  const LOST_BADGE = annotation.kind === "highlight" && (annotation.anchorStatus === "missing" || annotation.status === "stale")
+    ? '<span class="c-kind" style="color:#8a6116">待定位</span>' : "";
   const roundNo = Number.isFinite(annotation.round) ? annotation.round : 0;
   const isCurrentRound = roundNo === (state.round ?? 0);
   card.dataset.roundCur = isCurrentRound ? "1" : "0";
   const visibleNo = displayNo(annotation);
-  const actions = annotation.kind === "highlight"
-    ? '<button data-act="delete" class="danger">取消保留</button>'
-    : `${annotation.status === "active" ? '<button data-act="edit">编辑</button><button data-act="addressed">已处理</button><button data-act="deprecated">移到历史</button>' : '<button data-act="revive">恢复</button>'}<button data-act="delete" class="danger">删除</button>${conflicting.length ? '<button data-act="supersede">以此为准</button>' : ""}`;
+  // U04 紧凑列表：高频操作就地可点，低频操作（移到历史/以此为准）收进「⋯」
+  let actions;
+  if (annotation.kind === "highlight") {
+    actions = '<button data-act="delete" class="danger">取消保留</button>';
+  } else if (annotation.status === "active") {
+    actions = '<button data-act="edit">编辑</button><button data-act="addressed">已处理</button><button data-act="delete" class="danger">删除</button>'
+      + (conflicting.length ? '<button data-act="supersede">以此为准</button>' : '')
+      + '<details class="c-more"><summary title="更多">⋯</summary><div><button data-act="deprecated">移到历史</button></div></details>';
+  } else {
+    actions = '<button data-act="revive">恢复</button><button data-act="delete" class="danger">删除</button>';
+  }
   card.innerHTML = `
     <div class="c-head">
       <span class="c-id">${visibleNo}</span>
-      ${KIND_BADGE[annotation.kind] || ""}
+      ${KIND_BADGE[annotation.kind] || ""}${LOST_BADGE}
       ${annotation.status !== "active" ? `<span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>` : ""}
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
@@ -615,6 +634,7 @@ function cardElement(annotation) {
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
     <div class="c-actions">${actions}</div>`;
 
+  card.addEventListener("click", (event) => { if (event.target.closest(".c-quote")) card.classList.toggle("quote-open"); }, true);
   card.addEventListener("mouseenter", () => { state.hovered = annotation.id; drawLines(); applyPeek(annotation.id); });
   card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); clearPeek(); });
 
@@ -659,57 +679,63 @@ function cardElement(annotation) {
     centerOn(rect.x + rect.w / 2, rect.y + rect.h / 2);
   });
 
-  card.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const act = button.dataset.act;
-      if (act === "supersede") {
-        const losers = (annotation.conflicts_with || []).filter((otherId) => {
-          const other = state.annotations.find((entry) => entry.id === otherId);
-          return other && other.status === "active";
-        });
-        for (const loser of losers) {
-          await fetch(`/api/supersede?p=${encodeURIComponent(state.path)}`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ winner: annotation.id, loser }),
-          });
-        }
-        await loadAnnotations();
-        toast(`${displayNo(annotation)} 已替代 ${losers.map(displayNo).join("、")}（旧批注保留在历史中）`);
-        return;
-      }
-      if (act === "edit") { startCardEdit(card, annotation); return; }
-      if (act === "save-edit") {
-        const ta = card.querySelector(".card-edit");
-        await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: annotation.id, body: ta.value, event: "edited" }),
-        });
-        await loadAnnotations();
-        toast("批注已更新");
-        return;
-      }
-      if (act === "cancel-edit") { await loadAnnotations(); return; }
-      if (act === "delete") {
-        await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: annotation.id }),
-        });
-        await loadAnnotations();
-        toast(annotation.kind === "highlight" ? "已取消保留" : "批注已删除");
-        return;
-      }
-      const next = act === "addressed" ? { status: "addressed", weight: 0.5 }
-        : act === "deprecated" ? { status: "deprecated", weight: 0 }
-        : { status: "active", weight: 1 };
-      await patch(annotation.id, { ...next, event: act });
-      await loadAnnotations({ rerender: false });
-    });
-  });
   return card;
+}
+
+/* U04/决策16：卡片按钮走 #cards 容器事件委托——卡片列表会被筛选/选中重建，
+   逐元素绑定的 click 会在重建瞬间丢失（「取消保留」间歇性无效的根因）。
+   annotation 一律按 id 现查，不闭包旧对象。 */
+async function handleCardAction(button) {
+  const card = button.closest(".card");
+  if (!card) return;
+  const annotation = state.annotations.find(entry => entry.id === card.dataset.id);
+  if (!annotation) return;
+  const act = button.dataset.act;
+  if (act === "supersede") {
+    const losers = (annotation.conflicts_with || []).filter((otherId) => {
+      const other = state.annotations.find((entry) => entry.id === otherId);
+      return other && other.status === "active";
+    });
+    for (const loser of losers) {
+      await fetch(`/api/supersede?p=${encodeURIComponent(state.path)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ winner: annotation.id, loser }),
+      });
+    }
+    await loadAnnotations({ rerender: false });
+    toast(`${displayNo(annotation)} 已替代 ${losers.map(displayNo).join("、")}（旧批注保留在历史中）`);
+    return;
+  }
+  if (act === "edit") { startCardEdit(card, annotation); return; }
+  if (act === "save-edit") {
+    const ta = card.querySelector(".card-edit");
+    if (!ta) return;
+    await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: annotation.id, body: ta.value, event: "edited" }),
+    });
+    await loadAnnotations({ rerender: false });
+    toast("批注已更新");
+    return;
+  }
+  if (act === "cancel-edit") { await loadAnnotations({ rerender: false }); return; }
+  if (act === "delete") {
+    await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: annotation.id }),
+    });
+    await loadAnnotations({ rerender: false });
+    toast(annotation.kind === "highlight" ? "已取消保留" : "批注已删除");
+    return;
+  }
+  const next = act === "addressed" ? { status: "addressed", weight: 0.5 }
+    : act === "deprecated" ? { status: "deprecated", weight: 0 }
+    : { status: "active", weight: 1 };
+  await patch(annotation.id, { ...next, event: act });
+  await loadAnnotations({ rerender: false });
 }
 
 function selectCard(id) {
@@ -721,12 +747,20 @@ function selectCard(id) {
   reportUiState();
 }
 
+$("cards").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-act]");
+  if (!button) return;
+  event.stopPropagation();
+  try { await handleCardAction(button); }
+  catch (error) { toast("操作失败：" + String(error?.message || error)); }
+});
+
 function renderCards() {
   const host = $("cards");
   host.innerHTML = "";
-  const activeCount = state.annotations.filter((item) => item.status === "active").length;
+  const pendingCount = state.annotations.filter(item => feedbackGroup(item) === "pending").length;
   $("stat-count").textContent = state.annotations.length;
-  $("stat-active").textContent = activeCount;
+  $("stat-active").textContent = pendingCount; // 「当前」= 待处理组（与反馈面板计数同源）
   // PDF/图片没有标题结构：不显示「大纲」入口，避免点进去一片空白
   const outlineAvailable = state.mode === "text";
   if (railTab === "outline" && !outlineAvailable) railTab = "feedback";
@@ -743,7 +777,18 @@ function renderCards() {
   }
   const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
   if (!isCanvasMode() && feedbackFilter === 'versions') { renderVersions(host); return; }
-  for (const annotation of visible) host.appendChild(cardElement(annotation));
+  if (!isCanvasMode() && feedbackFilter === 'history' && visible.length > 3) {
+    // U03：历史默认折叠（超过 3 条才折叠），文字仍可读、可展开
+    const details = document.createElement('details');
+    details.className = 'history-fold';
+    details.innerHTML = `<summary>历史 ${visible.length} 条（点击展开）</summary>`;
+    const body = document.createElement('div');
+    for (const annotation of visible) body.appendChild(cardElement(annotation));
+    details.appendChild(body);
+    host.appendChild(details);
+  } else {
+    for (const annotation of visible) host.appendChild(cardElement(annotation));
+  }
   if (!visible.length && !isCanvasMode()) host.insertAdjacentHTML('beforeend', '<p class="feedback-empty">' + (feedbackFilter === 'pending' ? '没有待处理的反馈。选中文字，写下想改的地方。' : feedbackFilter === 'retained' ? '选中文字并点「保留」，留下后续修改不能动的内容。' : '处理过的反馈会留在这里，随时可以追溯。') + '</p>');
 }
 
@@ -2112,6 +2157,21 @@ async function loadAnnotations({ rerender = true } = {}) {
   state.annotations = data.annotations || [];
   state.revision = data.revision || 0;
   if (roundRes.ok) state.round = (await roundRes.json()).activeRound ?? 0;
+  if (!rerender) {
+    // 增量刷新：先解包旧锚点（保留文本），否则删除/取消的批注高亮会残留在文档上
+    const roots = [$("doc")];
+    try { const f = $("html-frame"); if (f && f.contentDocument && f.contentDocument.body) roots.push(f.contentDocument.body); } catch {}
+    for (const root of roots) {
+      if (!root) continue;
+      root.querySelectorAll(".anchor").forEach(mark => {
+        const parent = mark.parentNode;
+        if (!parent) return;
+        while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+        mark.remove();
+      });
+      if (root.normalize) root.normalize();
+    }
+  }
   if (rerender) await renderDocument();
   const decayed = state.mode === "image" ? 0 : await anchorAll();
   renderRegions();
@@ -2500,6 +2560,9 @@ $("sel-menu").addEventListener("click", async (event) => {
   pending = null;
   clearTextSelections();
   await loadAnnotations();
+  // U04：保留/删除线建在对应分组（保留组/待处理组）——用户立刻能看到自己刚标的
+  feedbackFilter = kind === "highlight" ? "retained" : "pending";
+  renderCards();
   toast(kind === "highlight" ? `已保留「${quote.slice(0, 18)}…」` : `已标记删除线「${quote.slice(0, 18)}…」`);
 });
 
@@ -2544,8 +2607,13 @@ async function saveAnnotation() {
       round: state.round ?? 0,
     }),
   });
+  const savedKind = pending.kind || "text"; // closeComposer 会清空 pending，先记下类型
   closeComposer();
   await loadAnnotations();
+  // U04：保存后自动切到该条所在的分组（保留 → 保留组，其他 → 待处理）——
+  // 否则用户在「待处理」Tab 里新建保留后看不到它，取消也无从下手
+  const savedGroup = savedKind === "highlight" ? "retained" : "pending";
+  if (feedbackFilter !== savedGroup) { feedbackFilter = savedGroup; renderCards(); }
   toast("批注已保存，编号永久保留");
 }
 
@@ -2947,13 +3015,22 @@ $("btn-out").addEventListener("click", () => {
 });
 $("btn-fit").addEventListener("click", fit);
 /* 右侧反馈栏可折叠：阅读的主体责任是文字本身；隐藏后批注走顶栏「批注」抽屉 */
-$("btn-cards").addEventListener("click", () => {
+/* U04 单一反馈入口：宽屏切换右侧反馈栏，窄屏切换抽屉（同一个面板的两种形态） */
+function toggleFeedbackPanel() {
+  if (window.innerWidth <= 1180 && !isCanvasMode()) {
+    renderDrawer();
+    $("drawer").hidden = !$("drawer").hidden;
+    $("btn-cards").setAttribute("aria-pressed", $("drawer").hidden ? "false" : "true");
+    return;
+  }
   const hidden = document.body.classList.toggle("cards-hidden");
   $("btn-cards").setAttribute("aria-pressed", String(hidden));
   try { localStorage.setItem("coeditor.cardsHidden", hidden ? "1" : "0"); } catch {}
-  if (!isCanvasMode()) fitReadWidth();
-});
+  if (!isCanvasMode()) { updatePaperWidth(); if (state.fitFollow) fitReadWidth(); }
+}
+$("btn-cards").addEventListener("click", toggleFeedbackPanel);
 try { if (localStorage.getItem("coeditor.cardsHidden") === "1") { document.body.classList.add("cards-hidden"); $("btn-cards").setAttribute("aria-pressed", "true"); } } catch {}
+$("btn-drawer").hidden = true; // U04：入口合并进「反馈」，按钮保留供旧脚本兼容
 /* 点缩放百分比回到 100%（浏览器习惯） */
 $("zoom").addEventListener("click", () => { if (!isCanvasMode()) { view.zoom = 1; applyTransform(); } });
 $("btn-layout").addEventListener("click", tidyLayout);
@@ -3063,7 +3140,7 @@ function renderDrawer() {
       <div class="d-item-head">
         <span class="c-id">${item.no || item.id}</span>
         ${item.kind === "highlight" ? '<span class="c-kind hl">保留</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
-        ${item.anchorStatus === "missing" ? '<span class="c-badge" style="color:#8a6116">缺失待确认</span>' : ""}
+        ${item.kind === "highlight" && (item.anchorStatus === "missing" || item.status === "stale") ? '<span class="c-badge" style="color:#8a6116">待定位</span>' : item.anchorStatus === "missing" ? '<span class="c-badge" style="color:#8a6116">缺失待确认</span>' : ""}
         ${item.status === "active" ? '<i class="live-dot" title="当前使用"></i>' : `<span class="c-badge">${LABELS[item.status] || item.status}</span>`}
         <span class="c-weight">${weightDots(item.weight)}</span>
       </div>
