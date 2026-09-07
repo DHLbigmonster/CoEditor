@@ -1483,3 +1483,11 @@ body[data-workspace-mode="read"] #cards .card .c-actions button {
 #cards-resizer:hover, body.resizing-cards #cards-resizer { background: rgba(0, 0, 0, .12); }
 body[data-workspace-mode="read"] #cards { width: var(--cards-w, 300px); flex: 0 0 var(--cards-w, 300px); }
 body.resizing-cards { cursor: col-resize; user-select: none; }
+
+/* ---------- S2 · 自动保存状态 + 撤销 toast ---------- */
+.edit-status { font-size: 11px; color: var(--ink-faint); margin-right: auto; }
+.toast-action {
+  border: 0; border-radius: 7px; margin-left: 12px; padding: 4px 12px;
+  background: rgba(255, 255, 255, .18); color: #fff; font-size: 12px; cursor: pointer;
+}
+.toast-action:hover { background: rgba(255, 255, 255, .3); }

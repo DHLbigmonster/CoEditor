@@ -728,7 +728,17 @@ async function handleCardAction(button) {
       body: JSON.stringify({ id: annotation.id }),
     });
     await loadAnnotations({ rerender: false });
-    toast(annotation.kind === "highlight" ? "已取消保留" : "批注已删除");
+    // S2：删除撤销——暂存整条数据，8 秒内可一键恢复
+    const undo = async () => {
+      await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...annotation, status: "active" }),
+      });
+      await loadAnnotations({ rerender: false });
+      toast("已撤销删除");
+    };
+    showUndoToast(annotation.kind === "highlight" ? "已取消保留" : "批注已删除", undo);
     return;
   }
   const next = act === "addressed" ? { status: "addressed", weight: 0.5 }
@@ -3338,12 +3348,20 @@ $("drawer-copy").addEventListener("click", async () => {
 });
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, action) {
   const node = $("toast");
   node.textContent = message;
+  node.querySelectorAll(".toast-action").forEach(n => n.remove());
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "toast-action";
+    btn.textContent = "撤销";
+    btn.addEventListener("click", () => { clearTimeout(toastTimer); node.classList.remove("show"); action(); });
+    node.appendChild(btn);
+  }
   node.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
+  toastTimer = setTimeout(() => node.classList.remove("show"), action ? 8000 : 2600);
 }
 
 /* ---------------- 批次：只有人明确点击才推进，文件 mtime 变化不替人做产品判断 ---------------- */
