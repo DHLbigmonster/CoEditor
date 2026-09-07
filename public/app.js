@@ -2294,7 +2294,8 @@ async function openDoc(path, { push = true } = {}) {
   const epoch = ++docEpoch;
   state.path = path;
   state.mode = kindOf(path);
-  if (state.workspaceMode === "edit") state.workspaceMode = "read";
+  // S1：旧画布偏好不再让文档自动进入空间总览——默认正常阅读（画布坐标数据保留）
+  if (state.workspaceMode !== "read") state.workspaceMode = "read";
   syncWorkspaceModeUi();
   if (push) history.pushState({ doc: path }, "", `?doc=${encodeURIComponent(path)}`);
   const response = await fetch(`/api/doc?p=${encodeURIComponent(path)}`);
@@ -2820,21 +2821,18 @@ function syncWorkspaceModeUi() {
   document.body.dataset.workspaceMode = state.workspaceMode;
   document.querySelectorAll("#workspace-modes [data-workspace-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.workspaceMode === state.workspaceMode);
-    if (button.dataset.workspaceMode === "edit") {
-      button.disabled = !isEditableDocument();
-      button.title = isEditableDocument() ? "编辑 Markdown / HTML 源码" : "此格式目前只读；可在画布中批注";
-    }
   });
+  // S1：不支持直接编辑的格式不显示"编辑"按钮（而不是显示但禁用）
+  const editBtn = document.querySelector('#workspace-modes [data-workspace-mode="edit"]');
+  if (editBtn) editBtn.hidden = !isEditableDocument();
+  const canvasBtn = document.getElementById("btn-canvas-mode");
+  if (canvasBtn) canvasBtn.textContent = isCanvasMode() ? "退出图片工作台" : "图片工作台（实验）";
   $("btn-fit").textContent = isCanvasMode() ? "显示全部" : "适合宽度";
   $("btn-layout").disabled = !isCanvasMode();
   $("btn-lines").disabled = !isCanvasMode();
-  // Word/PDF 等只读格式：编辑入口明确禁用并说明，而不是点了没反应
-  const editBtn = document.querySelector('[data-workspace-mode="edit"]');
-  if (editBtn) {
-    const editable = isEditableDocument();
-    editBtn.classList.toggle("mode-disabled", !editable);
-    editBtn.title = editable ? "进入源码编辑（⌘S 保存）" : "这种格式只读预览；修改走「批注 → 交给 Agent 改稿」，或另存为 Markdown/HTML 编辑";
-  }
+  // PDF 列按钮只在 PDF 模式显示（已移入更多菜单）
+  const colsBtn = document.getElementById("bar-pdf-cols");
+  if (colsBtn) colsBtn.hidden = state.mode !== "pdf";
 }
 
 async function setWorkspaceMode(mode) {
@@ -3114,6 +3112,9 @@ function toggleFeedbackPanel() {
   if (!isCanvasMode()) { updatePaperWidth(); if (state.fitFollow) fitReadWidth(); }
 }
 $("btn-cards").addEventListener("click", toggleFeedbackPanel);
+$("btn-canvas-mode").addEventListener("click", () => {
+  setWorkspaceMode(isCanvasMode() ? "read" : "canvas");
+});
 try { if (localStorage.getItem("coeditor.cardsHidden") === "1") { document.body.classList.add("cards-hidden"); $("btn-cards").setAttribute("aria-pressed", "true"); } } catch {}
 $("btn-drawer").hidden = true; // U04：入口合并进「反馈」，按钮保留供旧脚本兼容
 // 反馈栏拖拽调宽（280–460），记忆在本地

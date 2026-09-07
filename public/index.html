@@ -40,22 +40,14 @@
     <button id="rail-toggle" class="icon" title="收起侧栏">◧</button>
     <div class="doc-title" id="docpath">未选择文档</div>
     <div class="bar-tools">
-      <span id="workspace-modes" class="seg mode-seg" title="阅读、编辑与自由画布各自使用最合适的交互">
+      <span id="workspace-modes" class="seg mode-seg" title="阅读与编辑">
         <button data-workspace-mode="read" class="active">阅读</button>
         <button data-workspace-mode="edit">编辑</button>
-        <button data-workspace-mode="canvas" title="用于图片、箭头和新旧稿的空间排布；普通阅读不需要">空间批注</button>
       </span>
       <span id="save-badge" role="status" title="文档保存在本机目录，CoEditor 不上传任何内容"><i>✓</i>已保存到本地</span>
       <button id="btn-cards" class="chip" aria-pressed="false" title="打开/收起反馈面板（窄屏时以抽屉呈现）">反馈</button>
       <button id="btn-drawer" class="chip" hidden aria-hidden="true" tabindex="-1">批注</button> <!-- U04：入口已并入「反馈」；保留元素供旧脚本兼容 -->
       <button id="btn-export" class="chip" hidden>导出标注图</button>
-      <span class="divider"></span>
-      <span id="bar-pdf-cols" class="seg" hidden title="PDF 页面布局：单列 / 双列 / 三列">
-        <button data-cols="1" class="active">▦1</button>
-        <button data-cols="2">▦2</button>
-        <button data-cols="3">▦3</button>
-      </span>
-      <span class="divider"></span>
       <button id="btn-out" class="icon" title="缩小">−</button>
       <span id="zoom" class="zoom">100%</span>
       <button id="btn-in" class="icon" title="放大">＋</button>
@@ -63,6 +55,12 @@
       <details id="view-menu" class="view-menu">
         <summary class="icon" title="更多视图选项">•••</summary>
         <div class="view-menu-panel">
+          <button id="btn-canvas-mode" class="menu-action" title="图片区域反馈、箭头与新旧图对比（实验性）">图片工作台（实验）</button>
+          <span id="bar-pdf-cols" class="seg" hidden title="PDF 页面布局：单列 / 双列 / 三列" style="margin: 4px 8px; display:flex; gap:2px; background:rgba(0,0,0,.06); border-radius:8px; padding:2px;">
+            <button data-cols="1" class="active">▦1</button>
+            <button data-cols="2">▦2</button>
+            <button data-cols="3">▦3</button>
+          </span>
           <button id="btn-layout" class="menu-action" title="把画布上的批注卡重新排列到对应原文旁边">重置画布布局</button>
           <button id="btn-focus" class="menu-action" data-on="1">批注：当前</button>
           <button id="btn-lines" class="menu-action" data-on="0" title="自动时只显示当前批注的连接线">连接线：自动</button>
