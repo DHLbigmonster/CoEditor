@@ -2691,6 +2691,7 @@ $("sel-menu").addEventListener("click", async (event) => {
 
 function openComposer() {
   if (!pending) return;
+  closeAnchorCard(); // 浮卡绝不与意见输入框并存遮字
   const composer = $("composer");
   const rect = pending.clientRect || (window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).getBoundingClientRect() : { bottom: 200, left: 200 });
   composer.hidden = false;
