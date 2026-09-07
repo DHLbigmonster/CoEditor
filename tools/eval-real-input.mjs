@@ -85,7 +85,7 @@ if (result.md && !result.md.error) {
     return {
       markInDoc: !!mark,
       noConnector: !!mark && !document.querySelector('#lines path[data-ann="' + mark.dataset.ann + '"]'),
-      visibleNoPattern: !!card && /^\\d+-\\d+$/.test(card.querySelector('.c-id')?.textContent || ''),
+      visibleNoPattern: !!card && !card.querySelector('.c-id'), // S3：编号不再展示（数据层保留）
       retainLabel: card?.querySelector('.c-kind')?.textContent === '保留',
       cards: document.querySelectorAll("#cards .card").length,
     };

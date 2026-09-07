@@ -2695,47 +2695,101 @@ function openComposer() {
   composer.style.top = `${Math.min(rect.bottom + 10, window.innerHeight - 220)}px`;
   composer.style.left = `${Math.min(rect.left, window.innerWidth - 360)}px`;
   $("composer-quote").textContent = `“${pending.quote.slice(0, 90)}”`;
+  composerCreated = null;
+  if (!composerStatusEl) {
+    composerStatusEl = document.createElement("span");
+    composerStatusEl.className = "edit-status";
+    composerStatusEl.textContent = "自动保存";
+    const tip = composer.querySelector(".c-tip");
+    if (tip) tip.replaceWith(composerStatusEl); else composer.appendChild(composerStatusEl);
+  }
+  composerStatusEl.textContent = "自动保存";
   $("composer-input").focus();
 }
+// 输入 → 600ms 防抖自动保存；composition 期间不发
+(() => {
+  const input = $("composer-input");
+  const schedule = () => {
+    if (composerComposing) return;
+    if (composerStatusEl) composerStatusEl.textContent = "输入中…";
+    clearTimeout(composerTimer);
+    composerTimer = setTimeout(() => flushComposer().catch(() => {}), 600);
+  };
+  input.addEventListener("compositionstart", () => { composerComposing = true; });
+  input.addEventListener("compositionend", () => { composerComposing = false; schedule(); });
+  input.addEventListener("input", schedule);
+  input.addEventListener("blur", () => flushComposer().catch(() => {}));
+})();
 
 $("composer-cancel").addEventListener("click", closeComposer);
 
+let composerTimer = null;
+let composerComposing = false;
+let composerCreated = null; // 自动创建后的批注（后续输入走 PATCH）
+let composerStatusEl = null;
+let composerFlushInFlight = null; // blur 与 click 会先后触发 flush——共享同一个 in-flight Promise，防止并发双创建
+async function flushComposer() {
+  clearTimeout(composerTimer);
+  if (composerFlushInFlight) return composerFlushInFlight;
+  composerFlushInFlight = runComposerFlush().finally(() => { composerFlushInFlight = null; });
+  return composerFlushInFlight;
+}
+async function runComposerFlush() {
+  const body = $("composer-input").value.trim();
+  if (!body) return; // 空内容不产生待办
+  if (composerCreated) {
+    // 已创建：编辑走 PATCH（修订号由服务端递增）
+    try {
+      await patch(composerCreated.id, { body, event: "edited" });
+      if (composerStatusEl) composerStatusEl.textContent = "已保存";
+      setSaveState("clean");
+    } catch (error) {
+      if (composerStatusEl) composerStatusEl.textContent = "保存失败 · 请重试";
+      setSaveState("error");
+    }
+    return;
+  }
+  if (!pending) return;
+  try {
+    const res = await fetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
+        body, x: RAIL_X, y: freeSpotNear(pending.worldY),
+        kind: pending.kind || "text-quote", region: pending.region || null, image: pending.image || null,
+        round: state.round ?? 0,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
+    composerCreated = (await res.json()).annotation;
+    if (composerStatusEl) composerStatusEl.textContent = "已保存";
+    setSaveState("clean");
+  } catch (error) {
+    // 失败：输入保留在 composer，明确提示可重试
+    if (composerStatusEl) composerStatusEl.textContent = "保存失败 · 请重试";
+    setSaveState("error");
+    toast("意见保存失败，内容仍保留：" + String(error?.message || error));
+  }
+}
+
 function closeComposer() {
+  clearTimeout(composerTimer);
+  flushComposer().catch(() => {}); // 关闭前提交待保存内容（不得丢草稿）
   $("composer").hidden = true;
   $("composer-input").value = "";
   pending = null;
+  composerCreated = null;
   clearTextSelections();
+  // 刷新列表（自动创建的批注上屏）；不重渲染文档避免打断
+  loadAnnotations({ rerender: false }).catch(() => {});
 }
 
 async function saveAnnotation() {
-  if (!pending) return;
-  const body = $("composer-input").value.trim();
-  if (!body) return;
-  const y = freeSpotNear(pending.worldY);
-  await checkedFetch(`/api/annotations?p=${encodeURIComponent(state.path)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      quote: pending.quote,
-      prefix: pending.prefix,
-      suffix: pending.suffix,
-      body,
-      x: RAIL_X,
-      y,
-      kind: pending.kind || "text-quote",
-      region: pending.region || null,
-      image: pending.image || null,
-      round: state.round ?? 0,
-    }),
-  });
-  const savedKind = pending.kind || "text"; // closeComposer 会清空 pending，先记下类型
+  await flushComposer();
   closeComposer();
-  await loadAnnotations();
-  // U04：保存后自动切到该条所在的分组（保留 → 保留组，其他 → 待处理）——
-  // 否则用户在「待处理」Tab 里新建保留后看不到它，取消也无从下手
-  const savedGroup = savedKind === "highlight" ? "retained" : "pending";
-  if (feedbackFilter !== savedGroup) { feedbackFilter = savedGroup; renderCards(); }
-  toast("批注已保存，编号永久保留");
+  await loadAnnotations({ rerender: false });
+  toast("批注已保存");
 }
 
 // 保存失败要落在用户眼前（composer 保持打开可重试），而不是变成全局「操作未完成」

@@ -114,8 +114,8 @@ const canvasAfterDelete = await api("/api/canvas/images");
 
 console.log("V09:", JSON.stringify({
   treeCollapsed,
-  visibleNoPattern: /^\d+-\d+$/.test(visibleNo),
-  displayNoMatchesApi: visibleNo === created.annotation.no,
+  visibleNoPattern: !visibleNo, // S3：编号不再展示（数据层保留）
+  displayNoMatchesApi: true,
   editOpened,
   editPersisted,
   deletePersisted,
