@@ -1,0 +1,15 @@
+{
+ "v12": {
+  "resolveRefused": true,
+  "stillActiveAfterResolve": true
+ },
+ "v13": {
+  "retargetStatus": 200,
+  "historyTracked": true,
+  "resolveStillRefused": true
+ },
+ "mcpCrossCheck": {
+  "retainedReadable": true,
+  "coverageComplete": true
+ }
+}

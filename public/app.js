@@ -2165,6 +2165,340 @@ async function waitForPdfRenderer(timeout = 20000) { // 6s 在高负载下不够
   return Boolean(window.renderPdfToContainer);
 }
 
+/* ================= PPTX：自动逐页预览 + 页级区域批注 =================
+   三条产品红线：
+   1) 转换在本地完成，原件一个字节都不动；产物只进 .marginalia/pptx-cache/。
+   2) 批注锚在 **slideId**（幻灯片创建时分配的稳定 id）上，不是页码。
+      页码会随增删/重排漂移，slideId 不会；slideId 找不到就标「待定位」，绝不猜一个页码贴上去。
+   3) 没有引擎 / 转换失败 / 缺字体，一律如实提示并说明影响；绝不用近似渲染冒充原稿。 */
+const pptxState = { url: null, slides: [], slideIdToPage: new Map(), page: 1, info: null, fontsChecked: null };
+
+/** 批注 → 当前应落在第几页。返回 {page} / {page:0, missing:true}（待定位）/ legacy（只有页码，不可靠） */
+function pptxLocate(annotation) {
+  const region = annotation.region;
+  if (!region) return null;
+  if (region.slideId) {
+    const page = pptxState.slideIdToPage.get(String(region.slideId));
+    if (Number.isFinite(page)) {
+      return { page, movedFrom: Number.isFinite(region.page) && region.page !== page ? region.page : 0 };
+    }
+    return { page: 0, missing: true }; // 这张幻灯片不在了 —— 待定位，不猜
+  }
+  return { page: Number(region.page) || 1, legacy: true };
+}
+
+function pptxSlideIdOf(page) {
+  const slide = pptxState.slides.find((item) => item.index === page);
+  return slide ? String(slide.slideId) : null;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchPptxInfo(force) {
+  const query = `/api/pptx?p=${encodeURIComponent(state.path)}${force ? "&force=1" : ""}`;
+  const response = await fetch(query);
+  return response.json();
+}
+
+/** 转换是后台任务（可能几十秒）：轮询 /api/pptx-job 直到出结果 */
+async function pptxAwaitJob(epoch, onTick) {
+  const deadline = Date.now() + 180000;
+  while (Date.now() < deadline) {
+    await sleep(700);
+    if (epoch !== docEpoch) return null;
+    const job = await fetch(`/api/pptx-job?p=${encodeURIComponent(state.path)}`).then((r) => r.json()).catch(() => null);
+    if (!job || job.status === "idle") return fetchPptxInfo(false); // 任务记录已清，重新问一次
+    if (job.status === "converting") { onTick?.(job); continue; }
+    return job;
+  }
+  return { status: "failed", detail: "转换超时（超过 180 秒），请重试或检查文件是否过大/损坏。" };
+}
+
+function pptxFontBanner(info) {
+  const used = info.fontsUsed || [];
+  if (!used.length) return "";
+  const checked = pptxState.fontsChecked;
+  if (checked && checked.status === "ok" && checked.missing?.length) {
+    return `<div class="pptx-banner warn"><b>缺字体：${checked.missing.map(escapeHtml).join("、")}</b>
+      —— 预览里这些字会被替换成别的字体，排版可能与你看到的原稿不一致。<b>不要把这份预览当成原稿核对细节。</b>
+      <button class="pptx-link" id="pptx-font-recheck">重新检查</button></div>`;
+  }
+  if (checked && checked.status === "ok" && !checked.missing?.length) {
+    return `<div class="pptx-banner ok">已检查 ${checked.checked} 种字体，本机都有。
+      <button class="pptx-link" id="pptx-font-recheck">重新检查</button></div>`;
+  }
+  if (checked && checked.status === "unknown") {
+    return `<div class="pptx-banner warn">字体可用性检查失败（${escapeHtml(checked.reason || "未知原因")}）—— 无法确认是否缺字体。
+      <button class="pptx-link" id="pptx-font-recheck">重试</button></div>`;
+  }
+  return `<div class="pptx-banner">这份 PPT 用到了：${used.slice(0, 8).map(escapeHtml).join("、")}${used.length > 8 ? " 等" : ""}。
+    <button class="pptx-link" id="pptx-font-check">检查本机是否缺字体</button></div>`;
+}
+
+function renderPptxShell(host) {
+  host.innerHTML = `
+    <div class="pptx-view">
+      <div class="pptx-head" id="pptx-head"></div>
+      <div class="pptx-body">
+        <aside class="pptx-rail" id="pptx-rail" aria-label="幻灯片缩略图"></aside>
+        <main class="pptx-stage" id="pptx-stage">
+          <div class="slide-frame" id="slide-frame">
+            <div class="slide-canvas" id="slide-canvas"></div>
+            <div class="region-layer" id="slide-regions"></div>
+          </div>
+        </main>
+      </div>
+    </div>`;
+}
+
+async function renderPptx(host) {
+  host.classList.add("pptx-view-host");
+  const epoch = docEpoch;
+  host.innerHTML = '<div class="pptx-status">正在读取这份 PPT…</div>';
+  pptxState.fontsChecked = null;
+  let info = await fetchPptxInfo(false).catch(() => null);
+  if (epoch !== docEpoch) return;
+  if (info && info.status === "converting") {
+    host.innerHTML = '<div class="pptx-status">正在本地转换预览（不联网、不改原件）…</div>';
+    info = await pptxAwaitJob(epoch, (job) => {
+      const sec = Math.round((job.elapsedMs || 0) / 1000);
+      const el = host.querySelector(".pptx-status");
+      if (el) el.textContent = `正在本地转换预览… ${sec}s`;
+    });
+    if (epoch !== docEpoch || !info) return;
+  }
+  if (!info) { host.innerHTML = '<div class="pptx-banner err">无法读取这份 PPT。</div>'; return; }
+
+  pptxState.info = info;
+  pptxState.slides = info.slides || [];
+  pptxState.slideIdToPage = new Map(pptxState.slides.map((s) => [String(s.slideId), s.index]));
+  pptxState.url = info.pdfUrl || null;
+
+  if (info.status === "no-engine") return renderPptxNoEngine(host, info);
+  if (info.status !== "ready") return renderPptxFailed(host, info);
+
+  renderPptxShell(host);
+  if (!pptxState.page || pptxState.page > pptxState.slides.length) pptxState.page = 1;
+  await paintPptxSlide(epoch);
+}
+
+function renderPptxNoEngine(host, info) {
+  const mb = info.downloadBytes ? `（约 ${Math.round(info.downloadBytes / 1048576)} MB）` : "";
+  const pages = (info.slides || []).length;
+  host.innerHTML = `
+    <div class="pptx-empty">
+      <div class="pptx-banner err"><b>无法生成逐页预览：本机没有可用的转换引擎。</b></div>
+      <p class="pptx-lead">CoEditor 不会用近似渲染冒充原稿，也不会替你安装软件。要启用预览，需要你本机有一个本地转换引擎（LibreOffice）：</p>
+      <pre class="pptx-cmd">${escapeHtml(info.installHint || "brew install --cask libreoffice")}</pre>
+      <p class="pptx-note">体积${mb}。装好后回到这里重新打开这份 PPT 即可，无需其它设置。</p>
+      ${pages ? `<p class="pptx-note">已读到这份 PPT 的结构：<b>${pages} 页</b>（幻灯片 id：${(info.slides || []).slice(0, 12).map((s) => escapeHtml(s.slideId)).join("、")}${pages > 12 ? " …" : ""}）。
+        没有预览就不能在上面框选批注 —— 现在只能先装引擎，或改用图片批注的替代流程。</p>` : ""}
+      ${pptxFontBanner(info)}
+    </div>`;
+  bindPptxFontCheck(host, info);
+}
+
+function renderPptxFailed(host, info) {
+  host.innerHTML = `
+    <div class="pptx-empty">
+      <div class="pptx-banner err"><b>转换失败：${escapeHtml(info.detail || "未知原因")}</b></div>
+      <p class="pptx-note">预览没生成，所以不会展示任何「看起来像但不确定」的内容。原件未被修改。</p>
+      ${info.stderr ? `<pre class="pptx-cmd">${escapeHtml(String(info.stderr).slice(0, 1500))}</pre>` : ""}
+      ${(info.warnings || []).length ? `<pre class="pptx-cmd">${escapeHtml(info.warnings.join("\n").slice(0, 1500))}</pre>` : ""}
+      <button class="pptx-btn" id="pptx-retry">重试转换</button>
+    </div>`;
+  host.querySelector("#pptx-retry")?.addEventListener("click", () => renderPptx(host));
+}
+
+function bindPptxFontCheck(host, info) {
+  const run = async (refresh) => {
+    const button = host.querySelector("#pptx-font-check") || host.querySelector("#pptx-font-recheck");
+    if (button) { button.disabled = true; button.textContent = "检查中（首次约 7 秒）…"; }
+    const result = await fetch(`/api/pptx/fonts?p=${encodeURIComponent(state.path)}`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ refresh: refresh === true }),
+    }).then((r) => r.json()).catch(() => ({ status: "unknown", reason: "请求失败" }));
+    pptxState.fontsChecked = result;
+    // 只换横幅，不重渲染整页（避免闪掉当前幻灯片）
+    const old = host.querySelector(".pptx-banner.warn, .pptx-banner.ok");
+    if (old) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = pptxFontBanner({ ...info, fontsUsed: result.fonts || info.fontsUsed });
+      old.replaceWith(wrap.firstElementChild || wrap);
+      bindPptxFontCheck(host, info);
+    }
+  };
+  host.querySelector("#pptx-font-check")?.addEventListener("click", () => run(false));
+  host.querySelector("#pptx-font-recheck")?.addEventListener("click", () => run(true));
+}
+
+/** 画左侧缩略图轨 + 中间当前页 + 该页的区域批注 */
+async function paintPptxSlide(epoch) {
+  const info = pptxState.info;
+  const host = $("doc");
+  const rail = $("pptx-rail");
+  const stage = $("slide-canvas");
+  if (!rail || !stage) return;
+
+  // 头部：页数、缺字体/警告、重建按钮
+  const head = $("pptx-head");
+  const missing = pptxState.fontsChecked?.missing || [];
+  if (head) {
+    head.innerHTML = `
+      <span class="pptx-count">共 ${pptxState.slides.length} 页 · 第 ${pptxState.page} 页</span>
+      ${missing.length ? '<span class="pptx-flag">缺字体：' + escapeHtml(missing.join("、")) + '（预览可能失真）</span>' : ""}
+      ${(info.warnings || []).length ? '<span class="pptx-flag">转换有告警，见「详情」</span>' : ""}
+      ${pptxFontBanner({ ...info, fontsUsed: info.fontsUsed })}
+      <button class="pptx-link" id="pptx-rebuild" title="文件被 Agent 改过后重建预览">重建预览</button>`;
+    head.querySelector("#pptx-rebuild")?.addEventListener("click", async () => {
+      const button = head.querySelector("#pptx-rebuild");
+      button.disabled = true; button.textContent = "重建中…";
+      const e = docEpoch;
+      const next = await fetchPptxInfo(true);
+      if (e !== docEpoch) return;
+      if (next.status === "converting") {
+        const done = await pptxAwaitJob(e);
+        if (e === docEpoch && done) { pptxState.info = done; pptxState.url = done.pdfUrl || null; await renderPptx(host); }
+      } else if (e === docEpoch) {
+        await renderPptx(host);
+      }
+    });
+    bindPptxFontCheck(head, info);
+  }
+
+  // 缩略图轨
+  rail.innerHTML = "";
+  for (const slide of pptxState.slides) {
+    const thumb = document.createElement("button");
+    thumb.className = "slide-thumb" + (slide.index === pptxState.page ? " active" : "");
+    thumb.dataset.page = String(slide.index);
+    thumb.innerHTML = `<span class="st-no">${slide.index}</span><span class="st-canvas"></span>`;
+    const count = state.annotations.filter((a) => pptxLocate(a)?.page === slide.index).length;
+    if (count) thumb.insertAdjacentHTML("beforeend", `<span class="st-badge">${count}</span>`);
+    thumb.addEventListener("click", async () => {
+      pptxState.page = slide.index;
+      await paintPptxSlide(docEpoch);
+    });
+    rail.appendChild(thumb);
+    if (window.renderPdfPage) {
+      window.renderPdfPage(pptxState.url, slide.index, thumb.querySelector(".st-canvas"), { width: 168 })
+        .catch(() => { thumb.classList.add("st-error"); });
+    }
+  }
+
+  // 当前幻灯片
+  if (!window.renderPdfPage) { stage.innerHTML = '<p class="pptx-note">渲染器尚未加载，请稍候再打开。</p>'; return; }
+  const size = await window.renderPdfPage(pptxState.url, pptxState.page, stage, { width: 900 });
+  if (epoch !== docEpoch) return;
+  const frame = $("slide-frame");
+  if (frame) { frame.style.width = `${size.width}px`; frame.style.height = `${size.height}px`; }
+  drawSlideRegions();
+}
+
+/** 当前页上的区域批注框；已完成的变灰，历史保留 */
+function drawSlideRegions() {
+  const layer = $("slide-regions");
+  if (!layer) return;
+  layer.innerHTML = "";
+  let pending = 0;
+  for (const annotation of state.annotations) {
+    const located = pptxLocate(annotation);
+    if (!located || located.page !== pptxState.page) continue;
+    const region = annotation.region;
+    const box = document.createElement("div");
+    box.className = "region" + (annotation.status === "addressed" || feedbackGroup(annotation) === "history" ? " done" : "");
+    box.dataset.ann = annotation.id;
+    box.style.left = `${region.x * 100}%`;
+    box.style.top = `${region.y * 100}%`;
+    box.style.width = `${region.w * 100}%`;
+    box.style.height = `${region.h * 100}%`;
+    box.title = `${annotation.body || "（无意见）"}${located.movedFrom ? ` · 原第 ${located.movedFrom} 页` : ""}${located.legacy ? " · 仅页码绑定（不可靠）" : ""}`;
+    const no = document.createElement("span");
+    no.className = "region-no";
+    no.textContent = displayNo(annotation);
+    box.appendChild(no);
+    box.addEventListener("click", (event) => { event.stopPropagation(); state.selected = annotation.id; renderCards(); drawLines(); });
+    layer.appendChild(box);
+    if (feedbackGroup(annotation) === "pending") pending += 1;
+  }
+  const frame = $("slide-frame");
+  const orphans = state.annotations.filter((a) => pptxLocate(a)?.missing).length;
+  if (frame) {
+    frame.dataset.pending = String(pending);
+    frame.dataset.orphans = String(orphans);
+    if (orphans) {
+      const flag = document.createElement("div");
+      flag.className = "slide-orphan";
+      flag.textContent = `有 ${orphans} 条批注找不到对应幻灯片（可能被删除）——已在右栏标为「待定位」`;
+      frame.appendChild(flag);
+    }
+  }
+}
+
+/* 幻灯片框选：与 PDF 区域同一套交互，但锚点带上 slideId */
+function startSlideRegionDraft(event) {
+  const frame = event.target.closest("#slide-frame");
+  if (!frame) return;
+  event.preventDefault();
+  const frameRect = frame.getBoundingClientRect();
+  const startX = event.clientX;
+  const startY = event.clientY;
+  const draft = document.createElement("div");
+  draft.className = "region-draft";
+  frame.appendChild(draft);
+  const move = (moveEvent) => {
+    const x1 = Math.max(frameRect.left, Math.min(startX, moveEvent.clientX)) - frameRect.left;
+    const y1 = Math.max(frameRect.top, Math.min(startY, moveEvent.clientY)) - frameRect.top;
+    const x2 = Math.min(frameRect.right, Math.max(startX, moveEvent.clientX)) - frameRect.left;
+    const y2 = Math.min(frameRect.bottom, Math.max(startY, moveEvent.clientY)) - frameRect.top;
+    draft.style.left = `${x1}px`; draft.style.top = `${y1}px`;
+    draft.style.width = `${x2 - x1}px`; draft.style.height = `${y2 - y1}px`;
+  };
+  const up = (upEvent) => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    draft.remove();
+    const rx1 = Math.max(frameRect.left, Math.min(startX, upEvent.clientX));
+    const ry1 = Math.max(frameRect.top, Math.min(startY, upEvent.clientY));
+    const rx2 = Math.min(frameRect.right, Math.max(startX, upEvent.clientX));
+    const ry2 = Math.min(frameRect.bottom, Math.max(startY, upEvent.clientY));
+    const w = rx2 - rx1;
+    const h = ry2 - ry1;
+    if (w < 12 || h < 12) return;
+    const page = pptxState.page;
+    const slideId = pptxSlideIdOf(page);
+    const region = {
+      page, // 仅供显示/回退；真正的锚是 slideId
+      slideId,
+      x: (rx1 - frameRect.left) / frameRect.width,
+      y: (ry1 - frameRect.top) / frameRect.height,
+      w: w / frameRect.width,
+      h: h / frameRect.height,
+    };
+    pending = {
+      kind: "region",
+      quote: `第 ${page} 页（幻灯片 ${slideId || "未知"}）区域 (${region.x.toFixed(2)}, ${region.y.toFixed(2)})`,
+      prefix: "", suffix: "", region,
+      worldY: toWorld(rx1 + w / 2, ry1 + h / 2).y,
+    };
+    const composer = $("composer");
+    composer.hidden = false;
+    composer.style.top = `${Math.min(upEvent.clientY + 12, window.innerHeight - 220)}px`;
+    composer.style.left = `${Math.min(upEvent.clientX, window.innerWidth - 360)}px`;
+    $("composer-quote").textContent = `框选第 ${page} 页区域 · 宽 ${Math.round(region.w * 100)}% × 高 ${Math.round(region.h * 100)}%`;
+    $("composer-input").focus();
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
+
+/* 幻灯片上直接框选：不需要先切「区域工具」，也不进无限画布（PPT 默认就是翻页阅读） */
+$("doc").addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || state.mode !== "pptx") return;
+  if (event.target.closest(".region")) return; // 点已有批注框是选中，不是画新框
+  if (event.target.closest("#slide-frame")) startSlideRegionDraft(event);
+});
+
 async function renderDocument() {
   if (editSession) return; // 编辑态不重渲染，外部修改由保存时 409 提示
   const host = $("doc");
@@ -2205,17 +2539,7 @@ async function renderDocument() {
     return;
   }
   if (state.mode === "pptx") {
-    host.innerHTML = `
-      <div class="pptx-guide">
-        <p class="pg-title">PPT 不在这里渲染 —— 用批注闭环来改它</p>
-        <ol class="pg-steps">
-          <li><b>把要改的幻灯片截图（或导出 PNG）放进这个文件夹</b>，打开图片用「区域批注」圈出位置、写下要求；批注照常编号并进入约束。</li>
-          <li><b>直接对 Agent 说「按批注改这个 PPT」</b>：Agent 读取约束后用脚本改 .pptx（改文字、删页、换图），新版本放在原文件旁边，绝不覆盖原件。</li>
-          <li>让 Agent 把改后关键页导出 PNG 放上画布，与原图并排验收。</li>
-        </ol>
-        <p class="pg-note">当前版本尚未实现 PPTX 预览或手动编辑。以上是图片批注的替代流程，不等于直接编辑 PPT；外部 Agent 的转换和修改结果需要你逐页核对。</p>
-      </div>`;
-    state.text = "";
+    await renderPptx(host);
     return;
   }
   if (state.mode === "image") {

@@ -162,6 +162,46 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   return { text, pages: pdf.numPages, scale, cols };
 };
 
+/* ---------------- 单页渲染（PPTX 幻灯片视图用） ----------------
+   缩略图轨一次要画十几页，每页都 getDocument 会重复下载/解析同一份 PDF。
+   这里按 url 缓存文档句柄；url 内含内容哈希，文件变了 url 就变，不会读到旧句柄。 */
+const pdfDocCache = new Map();
+function getPdfDoc(url) {
+  if (!pdfDocCache.has(url)) {
+    const task = pdfjsLib.getDocument({ url });
+    pdfDocCache.set(url, task.promise);
+    task.promise.catch(() => pdfDocCache.delete(url)); // 失败不留坏句柄，允许重试
+  }
+  return pdfDocCache.get(url);
+}
+
+window.pdfPageCount = async function pdfPageCount(url) {
+  const pdf = await getPdfDoc(url);
+  return pdf.numPages;
+};
+
+/** 把 PDF 的第 pageNumber 页画进 target（清空 target），返回 CSS 尺寸。 */
+window.renderPdfPage = async function renderPdfPage(url, pageNumber, target, { width = 480 } = {}) {
+  const pdf = await getPdfDoc(url);
+  const page = await pdf.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.max(0.05, width / base.width) });
+  const outputScale = Math.max(1, window.devicePixelRatio || 1);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+  canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+  canvas.style.width = `${viewport.width}px`;
+  canvas.style.height = `${viewport.height}px`;
+  target.innerHTML = "";
+  target.appendChild(canvas);
+  await page.render({
+    canvasContext: canvas.getContext("2d"),
+    viewport,
+    transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
+  }).promise;
+  return { width: viewport.width, height: viewport.height };
+};
+
 // 列布局切换：重渲染当前 PDF（app.js 调用）
 window.rerenderPdfWithCols = async function rerenderPdfWithCols(container, url, cols) {
   const zoom = window.__coeditorPdfDoc && window.__coeditorPdfDoc.container === container ? (window.__coeditorPdfZoom || 1) : 1;

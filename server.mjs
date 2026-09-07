@@ -11,9 +11,13 @@ import { createHash } from "node:crypto";
 import { acquireStoreLock, readStore, writeStore, atomicWrite } from './lib/store.mjs';
 import { currentRound, reviewSnapshot, resolveReviewed, annotationVersion, ensureAnnotationNos, allocateNo, offsetsOf, reopenResolvedAnnotations, lastResolvedNos, retainedHealth } from './lib/review.mjs';
 import { listVersions, registerVersion, setVersionStatus, textDiff, versionIdOf, prepareVersionRegistration, carryRetainedAnnotations } from './lib/version.mjs';
+import { preparePreview, readCachedPreview, detectEngine, referencedFonts, checkFonts, cacheUsage } from './lib/pptx.mjs';
 const APP_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 let requestQueue = Promise.resolve();
 const QUEUE_WAIT_TIMEOUT_MS = 15000;
+/* PPTX 转换后台任务：key = 绝对文件路径。转换可能几十秒，不能顶在一次 HTTP 请求里
+   （server.requestTimeout 只有 30s），也不能进全局队列（会把其它 API 一起堵住）。 */
+const PPTX_JOBS = new Map();
 async function queueRequest(timeoutMs = QUEUE_WAIT_TIMEOUT_MS) {
  const previous = requestQueue; let release;
  requestQueue = new Promise(resolve => { release = resolve; });
@@ -240,7 +244,9 @@ const requestHandler = async (req, res) => {
       return send(403, JSON.stringify({ error: 'untrusted-origin' }));
     }
     // The picker can remain open for minutes; it must not block state transactions.
-    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/folder-picker') {
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/folder-picker'
+        // pptx 转换是长任务，走自己的后台任务表；进全局队列会把其它 API 一起堵死
+        && !url.pathname.startsWith('/api/pptx')) {
       releaseQueue = await queueRequest();
       // versions 的登记/验收/继承都改 sidecar，必须与批注写入同一把锁（否则可与 MCP 并发互踩）
       if (/^\/api\/(annotations|constraints|rounds|canvas|supersede|sync|review|resolve|versions)(?:\/|$)/.test(url.pathname)) releaseStore = await acquireStoreLock(SIDECAR);
@@ -402,6 +408,74 @@ const requestHandler = async (req, res) => {
       const text = await readFile(target, "utf8");
       return send(200, JSON.stringify({ path: url.searchParams.get("p"), text, mtime: info.mtimeMs }));
     }
+
+    /* ---------- PPTX：本地逐页预览（可选引擎） ----------
+       状态机：ready / converting / no-engine / failed。
+       绝不给「看起来像预览但不是原稿」的东西：没引擎就说没引擎，转换失败就说失败。 */
+    if (url.pathname.startsWith("/api/pptx")) {
+      const docRel = url.searchParams.get("p");
+      const target = docRel ? await safeResolveReal(docRel) : null;
+      if (!target) return send(400, JSON.stringify({ error: "invalid path" }));
+      if (extname(target).toLowerCase() !== ".pptx") return send(400, JSON.stringify({ error: "not a pptx" }));
+      const cacheRoot = join(ROOT, ".marginalia", "pptx-cache");
+      const relFor = (key, name) => `.marginalia/pptx-cache/${key}/${name}`;
+      const withUrls = (result) => (result && result.status === "ready"
+        ? { ...result, pdfUrl: `/api/raw?p=${encodeURIComponent(relFor(result.cacheKey, result.pdfName))}` }
+        : result);
+
+      // 注意："/api/pptx-job" 也满足 startsWith("/api/pptx")，必须先于下面的 guard 处理
+      if (url.pathname === "/api/pptx-job") {
+        const job = PPTX_JOBS.get(target);
+        if (!job) return send(200, JSON.stringify({ status: "idle" }));
+        if (!job.done) return send(200, JSON.stringify({ status: "converting", startedAt: job.startedAt, elapsedMs: Date.now() - job.startedAt }));
+        const result = job.result;
+        PPTX_JOBS.delete(target);
+        return send(200, JSON.stringify({ status: result?.status || "failed", ...withUrls(result), cache: await cacheUsage(cacheRoot) }));
+      }
+
+      // 按需字体校验：全量枚举系统字体约 7.5s，绝不放进打开文档的路径
+      if (url.pathname === "/api/pptx/fonts" && req.method === "POST") {
+        const body = await readJson(req);
+        const cachedManifest = await readCachedPreview({ absPath: target, cacheRoot });
+        let names = Array.isArray(body.fonts) ? body.fonts : (cachedManifest?.fontsUsed || []);
+        // 没有缓存清单（例如还没转过、或引擎都没装）时，直接从 pptx 里读，而不是返回空结果
+        if (!names.length) names = (await referencedFonts(target).catch(() => ({ used: [] }))).used;
+        const result = await checkFonts(names, { cacheRoot, refresh: body.refresh === true });
+        return send(200, JSON.stringify({ status: "ok", ...result, fonts: names }));
+      }
+
+      if (url.pathname !== "/api/pptx") return send(404, JSON.stringify({ error: "not found" }));
+
+      const force = url.searchParams.get("force") === "1" || (req.method === "POST" && (await readJson(req)).force === true);
+      const jobKey = target;
+      const running = PPTX_JOBS.get(jobKey);
+      if (running) {
+        return send(200, JSON.stringify({ status: "converting", startedAt: running.startedAt, elapsedMs: Date.now() - running.startedAt }));
+      }
+
+      if (!force) {
+        const cached = await readCachedPreview({ absPath: target, cacheRoot });
+        if (cached) return send(200, JSON.stringify(withUrls(cached)));
+      }
+
+      // 需要真转换：先看有没有引擎（有/没有都是快查询），再决定是起任务还是直接如实告知
+      const engine = await detectEngine();
+      if (!engine.ok) {
+        // 无引擎也要给出真实页数与字体清单：能不能预览是一回事，有没有读到文件是另一回事
+        const empty = await preparePreview({ absPath: target, cacheRoot, force: true });
+        return send(200, JSON.stringify(empty));
+      }
+
+      const startedAt = Date.now();
+      const job = preparePreview({ absPath: target, cacheRoot, force: true })
+        .then((result) => { PPTX_JOBS.set(jobKey, { ...PPTX_JOBS.get(jobKey), done: true, result }); })
+        .catch((error) => { PPTX_JOBS.set(jobKey, { ...PPTX_JOBS.get(jobKey), done: true, result: { status: "failed", detail: String(error?.message || error).slice(0, 500) } }); });
+      PPTX_JOBS.set(jobKey, { startedAt, done: false, promise: job });
+      // 任务完成后留 60s 供轮询取结果，之后自动清掉，不留内存垃圾
+      setTimeout(() => { const j = PPTX_JOBS.get(jobKey); if (j && j.done) PPTX_JOBS.delete(jobKey); }, 60000).unref?.();
+      return send(200, JSON.stringify({ status: "converting", startedAt, elapsedMs: 0, engine }));
+    }
+
 
     /* ---------- 编辑写回：文本文件保存（VSCode 式编辑态） ---------- */
     if (url.pathname.startsWith("/api/write")) {
