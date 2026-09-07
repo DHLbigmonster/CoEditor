@@ -2316,6 +2316,8 @@ async function loadAnnotations({ rerender = true } = {}) {
   renderDrafts();
   reportUiState();
   if (floatCard && !state.annotations.some(e => e.id === floatCard.annId)) closeAnchorCard();
+  // 图片/PDF 的区域线在增量刷新后也要重画（全量路径由 renderDocument 覆盖）
+  drawLines();
   if (!$('drawer').hidden) renderDrawer();
   if (decayed > 0) toast(decayed + ' 条反馈暂时找不到原文，要求已保留，请检查定位');
 }

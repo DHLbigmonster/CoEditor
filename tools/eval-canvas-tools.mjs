@@ -22,6 +22,7 @@ ws.on("message", (data) => {
 await new Promise((resolve) => ws.on("open", resolve));
 await send("Page.enable");
 await send("Runtime.enable");
+await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false }); // 电池复用 tab 时视口不确定，显式固定
 await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 2, mobile: false });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const evaluate = async (expression) => {

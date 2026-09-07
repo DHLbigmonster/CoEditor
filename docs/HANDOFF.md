@@ -1,7 +1,7 @@
 # CoEditor 开发交接（HANDOFF）
 
 > 给下一个接手的 AI（Codex / Claude）或人类协作者。读完这页即可安全动手。
-> 最后更新：v1.4.2 · 2026-09-06
+> 最后更新：v1.5.0 · 2026-09-07
 
 ## 产品一句话
 
@@ -62,7 +62,9 @@
 40. **飞书式浮卡**：`openAnchorCard`（点击 .anchor[data-ann] → world 内绝对定位浮卡），委托在 #doc（PDF 文字层/md）+ iframe click（HTML）；canvas 模式早退用自己的卡片体系；浮卡操作复用 handleCardAction（容器委托同一入口）；loadAnnotations 时对应批注不存在则自动关闭。新增正文锚点交互走这条链，别再开右栏滚屏。
 41. **PDF 模式 #page 无纸面**：`#page:has(.pdf-page)` 透明背景 + `width: max-content`（每页 PDF 自身就是纸）；PDF 放大靠 `setPdfZoom` 重渲染，#page 跟着内容长。别给 PDF 模式加固定白板。
 42. **划线是飞书式**：保留默认细黄下划线（inset shadow），hover/选中才淡黄底；普通批注近无痕短下划线。用户明确否决过"满块色底"。改样式时 PDF 文字层与正文/markdown 两条路径都要看。
-43. **约束输出 = 任务卡**：三处（MCP brief/网页 reviewSnapshot/网页 constraintsText）统一走 `buildInstruction`——位置+引用+意见+动作一句话。改约束格式三处同步。
+43. **产品方向（v1.5.0 定稿）**：轻量改稿伴侣——唯一主流程「选字→批注(自动保存)→Agent 按批注修改→灰显」。主导航只有阅读/编辑+反馈；空间画布在更多菜单（图片工作台·实验）。两态呈现（待修改/已修改），异常是说明（需确认位置）不是状态。主视图无编号/轮次/权重（数据层保留）。最小改动原则 + 保留持续有效是 Agent 侧两条铁律。保留视觉 = 极淡黄底 + md/text 页边小书签（retain-gutter-mark）。
+44. **composer 自动保存**：新建批注 600ms 防抖自动创建（flushComposer），后续编辑 PATCH；blur 与 click 并发触发必须 in-flight 互斥（composerFlushInFlight）——否则双 POST 双创建。closeComposer 前 flush 不得丢草稿。
+45. **约束输出 = 任务卡**：三处（MCP brief/网页 reviewSnapshot/网页 constraintsText）统一走 `buildInstruction`——位置+引用+意见+动作一句话。改约束格式三处同步。
 44. **锚点样式分层**：意图样式（kind: highlight 黄底/strike 删除线）与状态样式（addressed/stale/deprecated）分离——状态规则必须 :not([data-kind="highlight"]) 跳过保留（同特异性源顺序覆盖曾把保留画出金色粗底边）。保留永不画线、永不加 padding（PDF 文字层行内盒不可改）。
 41. **卡片按钮走容器委托**（#cards click → handleCardAction，annotation 按 id 现查）——列表重建会让逐元素绑定的 click 丢失（「取消保留」间歇性无效的根因）。新增卡片交互一律委托。
 42. **引导线范围**：只在 image/pdf（区域线）与 canvas 画线；text/docx/html 阅读模式 drawLines 早退并隐藏 SVG（fixed 侧栏让线坐标系失效 + 12000px SVG 撑假横滚）。恢复前先解决坐标体系。
