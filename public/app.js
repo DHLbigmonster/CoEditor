@@ -572,11 +572,36 @@ async function anchorAll() {
     node.dataset.status = item ? item.status : "active";
     node.dataset.kind = item && (item.kind === "highlight" || item.kind === "strike") ? item.kind : "comment";
   });
+  // 补充决策：保留 = 页边低对比小标记（md/text 文档；正文只留极淡底）。
+  // 每个保留范围一个标记（跨行不重复堆图标——按 annId 去重），可键盘聚焦，点击弹浮卡
+  root.querySelectorAll(".retain-gutter-mark").forEach(n => n.remove());
+  if (state.mode === "text") {
+    const seen = new Set();
+    for (const node of root.querySelectorAll('.anchor[data-kind="highlight"]')) {
+      const annId = node.dataset.ann;
+      if (!annId || seen.has(annId)) continue;
+      seen.add(annId);
+      const mark = document.createElement("button");
+      mark.className = "retain-gutter-mark";
+      mark.type = "button";
+      mark.title = "已保留 · Agent 不应改写（点击查看/取消）";
+      mark.setAttribute("aria-label", "已保留标记");
+      mark.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const r = node.getBoundingClientRect();
+        const wr = worldRect(node);
+        openAnchorCard(annId, { x: wr.x, y: wr.y, w: wr.w, h: wr.h });
+      });
+      node.appendChild(mark);
+    }
+  }
   return decayed;
 }
 
 /* ---------------- 卡片 ---------------- */
-const LABELS = { active: "本轮", addressed: "已处理", stale: "已过期", deprecated: "已移除" };
+/* S3 两态呈现：待修改 / 已修改；异常是说明不是状态（需确认位置）。
+   编号/轮次/权重退到内部数据，主界面不再展示（详情按需查 API）。 */
+const LABELS = { active: "", addressed: "已修改 ✓", stale: "需确认位置", deprecated: "已删除" };
 
 function displayNo(itemOrId) {
   const item = typeof itemOrId === "string"
@@ -608,7 +633,7 @@ function cardElement(annotation) {
   const roundNo = Number.isFinite(annotation.round) ? annotation.round : 0;
   const isCurrentRound = roundNo === (state.round ?? 0);
   card.dataset.roundCur = isCurrentRound ? "1" : "0";
-  const visibleNo = displayNo(annotation);
+  const visibleNo = displayNo(annotation); // 内部引用用；主界面不再展示编号
   // U04 紧凑列表：高频操作就地可点，低频操作（移到历史/以此为准）收进「⋯」
   let actions;
   if (annotation.kind === "highlight") {
@@ -622,13 +647,14 @@ function cardElement(annotation) {
   }
   card.innerHTML = `
     <div class="c-head">
-      <span class="c-id">${visibleNo}</span>
       ${KIND_BADGE[annotation.kind] || ""}${LOST_BADGE}
+      ${annotation.status === "addressed" ? '<span class="c-done">已修改 ✓</span>' : ""}
+      ${annotation.status === "stale" ? '<span class="c-badge" style="color:#8a6116">需确认位置</span>' : ""}
       ${annotation.status !== "active" ? `<span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>` : ""}
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
       ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.map(displayNo).join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.map(displayNo).join("/")}</span>` : ""}
-      ${Number(annotation.weight ?? 1) < 1 ? `<span class="c-weight" title="权重 ${Number(annotation.weight ?? 1).toFixed(2)}">${weightDots(annotation.weight)}</span>` : ""}
+
     </div>
     <div class="c-body">${escapeHtml(annotation.body || (annotation.kind === "highlight" ? "（标记保留 · 这段内容要保留）" : annotation.kind === "strike" ? "（删除线标记 · 建议删除此段）" : ""))}</div>
     <div class="c-quote">${escapeHtml(annotation.quote || "（原文已变更，锚点失效）")}</div>
@@ -766,7 +792,6 @@ function openAnchorCard(annotationId, anchorRectWorld) {
   el.className = "anchor-float-card";
   el.innerHTML = `
     <div class="c-head">
-      <span class="c-id">${displayNo(item)}</span>
       ${KIND[item.kind] || ""}${lost ? '<span class="c-kind" style="color:#8a6116">待定位</span>' : ""}
       <button class="fc-close icon" title="关闭">✕</button>
     </div>
@@ -1347,7 +1372,7 @@ async function exportAnnotatedImage({ openDrawer = true } = {}) {
     context.strokeRect(x, y, w, h);
     const font = Math.round(scaleUnit * 0.024);
     context.font = `600 ${font}px -apple-system, Helvetica, sans-serif`;
-    const visibleNo = displayNo(annotation);
+    const visibleNo = displayNo(annotation); // 内部引用用；主界面不再展示编号
     const textWidth = context.measureText(visibleNo).width;
     const pad = font * 0.4;
     context.fillStyle = color;
@@ -3238,15 +3263,23 @@ function constraintsText() {
     ];
   };
   const lines = [
-    `# ${state.path} · 修改前必读的人类约束`,
+    `# ${state.path} · 修改要求与保留要求`,
     "",
-    `## 第 ${round} 批次（本轮 · 进行中）· ${current.length} 条`,
+    `两条铁律：① 最小改动——除下列条目外，其余内容保持原样，不擅自润色、改数字、删引用、换结构；② 「保留」条目持续有效直到用户取消，冲突时先暂停询问。`,
+    `完成后逐条报告完成情况（部分完成只报部分）。`,
+    "",
+    `## 待修改 · ${current.length} 条`,
     "",
     ...current.flatMap(annLine),
   ];
   if (older.length) {
-    lines.push("", `## 历史批次（仍需参考的旧约束）· ${older.length} 条`, "");
+    lines.push("", `## 更早的意见（仍有效）· ${older.length} 条`, "");
     lines.push(...older.flatMap(annLine));
+  }
+  const retainedNow = state.annotations.filter((item) => item.kind === "highlight" && item.status === "active");
+  if (retainedNow.length) {
+    lines.push("", `## 保留要求（持续有效 · 不得改写删除）· ${retainedNow.length} 条`, "");
+    lines.push(...retainedNow.flatMap(annLine));
   }
   if (canvasArrows.length) {
     lines.push("", `## 画布手写（同属人类意图）`, "");
@@ -3268,11 +3301,10 @@ function renderDrawer() {
   const itemHtml = (item) => `
     <div class="d-item" data-id="${item.id}" data-status="${item.status}">
       <div class="d-item-head">
-        <span class="c-id">${item.no || item.id}</span>
         ${item.kind === "highlight" ? '<span class="c-kind hl">保留</span>' : item.kind === "strike" ? '<span class="c-kind st">删除线</span>' : ""}
         ${item.kind === "highlight" && (item.anchorStatus === "missing" || item.status === "stale") ? '<span class="c-badge" style="color:#8a6116">待定位</span>' : item.anchorStatus === "missing" ? '<span class="c-badge" style="color:#8a6116">缺失待确认</span>' : ""}
         ${item.status === "active" ? '<i class="live-dot" title="当前使用"></i>' : `<span class="c-badge">${LABELS[item.status] || item.status}</span>`}
-        <span class="c-weight">${weightDots(item.weight)}</span>
+
       </div>
       ${item.body ? `<div class="d-item-body">${escapeHtml(item.body)}</div>` : ""}
       <div class="d-item-quote">「${escapeHtml(item.quote.slice(0, 50))}」</div>

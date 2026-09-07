@@ -262,7 +262,7 @@ async function callTool(name, args = {}) {
       return {
         doc: args.doc,
         count: list.length + canvas.arrows.length,
-        rule: "以下为人类留下的当前约束（status=active = 人新增、待处理），修改文档时必须逐条遵守；过期(stale)批注仅供追溯，不构成约束；kind=highlight 表示内容保留，原文不得删除或改写。处理完成后调用 resolve_annotations 并传入读取时的 versions。保留条目不属于待办，不能被归档；只标记已完成的普通批注。",
+        rule: "两条铁律：(1) 最小改动原则——除下列意见与保留要求外，文档其余内容保持原样，不擅自润色、改数字、删引用、换结构；跨段一致性调整先说明。(2) 保留要求（kind=highlight）持续有效直到用户取消，不得因完成其他修改而删除或改写这些内容；与保留冲突的任务先暂停询问。修改完成后调用 resolve_annotations 并传读取时的 versions（只回写确实完成的条目；部分完成只报部分）。",
         constraints: list.map((item) => {
           const briefItem = brief(item);
           briefItem.conflicts_with = item.live_conflicts || [];

@@ -190,15 +190,16 @@ body.paper-dark #doc pre { background: #181510; }
 .region.coeditor-peek { outline-width: 2.5px; }
 
 /* 高亮 / 删除线标记（mark 型批注） */
-/* 保留 = 飞书式划线：默认细黄下划线（宽随文字），hover/选中才淡黄底 */
+/* 保留（补充决策）：默认极淡黄底（可发现但不干扰阅读），hover/选中加深；
+   页边小标记由 anchorAll 渲染（md/text 文档）。不画引导线、不变灰 */
 .anchor[data-kind="highlight"] {
-  background: transparent;
-  box-shadow: inset 0 -2px 0 rgba(230, 168, 25, .55);
-  border-radius: 0;
+  background: rgba(246, 211, 91, .18);
+  box-shadow: none;
+  border-radius: 2px;
 }
 .anchor[data-kind="highlight"]:hover,
 .anchor[data-kind="highlight"].coeditor-peek {
-  background: rgba(246, 211, 91, .30);
+  background: rgba(246, 211, 91, .38);
 }
 body.paper-dark .anchor[data-kind="highlight"] { background: rgba(244, 214, 74, .28); }
 .anchor[data-kind="strike"] {
@@ -1491,3 +1492,18 @@ body.resizing-cards { cursor: col-resize; user-select: none; }
   background: rgba(255, 255, 255, .18); color: #fff; font-size: 12px; cursor: pointer;
 }
 .toast-action:hover { background: rgba(255, 255, 255, .3); }
+
+/* ---------- S3 · 两态呈现 ---------- */
+.c-done { font-size: 11px; color: var(--addressed); margin-left: auto; }
+body[data-workspace-mode="read"] #cards .card[data-status="addressed"],
+#cards .card[data-status="addressed"] { opacity: .62; }
+#cards .card[data-status="addressed"]:hover, #cards .card[data-status="addressed"].selected { opacity: 1; }
+#cards .card .c-weight { display: none; }
+
+/* 页边保留小标记（md/text）：低对比书签，可聚焦，点击弹浮卡 */
+.retain-gutter-mark {
+  position: absolute; left: -14px; width: 10px; height: 14px;
+  background: rgba(230, 168, 25, .55);
+  border-radius: 0 3px 3px 0; border: 0; padding: 0; cursor: pointer;
+}
+.retain-gutter-mark:hover, .retain-gutter-mark:focus-visible { background: rgba(230, 168, 25, .95); outline: 2px solid rgba(230, 168, 25, .4); outline-offset: 1px; }
