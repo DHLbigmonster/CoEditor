@@ -1507,3 +1507,5 @@ body[data-workspace-mode="read"] #cards .card[data-status="addressed"],
   border-radius: 0 3px 3px 0; border: 0; padding: 0; cursor: pointer;
 }
 .retain-gutter-mark:hover, .retain-gutter-mark:focus-visible { background: rgba(230, 168, 25, .95); outline: 2px solid rgba(230, 168, 25, .4); outline-offset: 1px; }
+
+#cards-body { min-width: 0; }

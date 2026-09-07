@@ -134,11 +134,20 @@ async function ensureRenderedDiff(active) {
   if (shell) paintVersions(shell);
 }
 
+/* S1' 分组收敛：主视图只保留 待修改/已修改 两组；保留/历史/版本对照进「更多」下拉 */
 function feedbackTabs() {
- const labels = { pending: '待处理', retained: '保留', history: '历史', versions: '版本对照' };
- // 版本数与批注数是两回事：用批注数组计数会虚报，这里各数各的
- const countOf = key => key === 'versions' ? versionState.list.length : state.annotations.filter(a => feedbackGroup(a) === key).length;
- return '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">' + Object.entries(labels).map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + countOf(key) + '</b></button>').join('') + '</div>';
+ const main = [['pending', '待修改'], ['addressed', '已修改']];
+ const groupCount = key => state.annotations.filter(x => feedbackGroup(x) === key).length;
+ let html = '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">';
+ html += main.map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + groupCount(key) + '</b></button>').join('');
+ const histCount = groupCount('history');
+ html += '<button role="tab" aria-selected="' + (feedbackFilter === 'history') + '" data-feedback="history">已修改历史' + (histCount ? ' <b>' + histCount + '</b>' : '') + '</button>';
+ html += '<details class="tabs-more"><summary title="保留要求与版本对照">⋯</summary><div>'
+      + '<button data-feedback="retained">保留 <b>' + groupCount('retained') + '</b></button>'
+      + '<button data-feedback="versions">版本对照 <b>' + versionState.list.length + '</b></button>'
+      + '</div></details>';
+ html += '</div>';
+ return html;
 }
 document.addEventListener('click', event => { const button = event.target.closest('[data-feedback]'); if (!button) return; feedbackFilter = button.dataset.feedback; renderCards(); renderDrawer(); drawLines(); });
 function isCanvasMode() { return state.workspaceMode === "canvas"; }
@@ -868,7 +877,7 @@ $("cards").addEventListener("click", async (event) => {
 });
 
 function renderCards() {
-  const host = $("cards");
+  const host = $("cards-body"); // 列表容器与静态头部分离（innerHTML 清空不抹头部）
   host.innerHTML = "";
   const pendingCount = state.annotations.filter(item => feedbackGroup(item) === "pending").length;
   $("stat-count").textContent = state.annotations.length;
@@ -882,10 +891,10 @@ function renderCards() {
         + '<button role="tab" data-rail-tab="outline"' + (railTab === 'outline' ? ' aria-selected="true"' : '') + '>大纲</button>'
         + '<button role="tab" data-rail-tab="feedback"' + (railTab === 'feedback' ? ' aria-selected="true"' : '') + '>反馈</button>'
         + '</div>'
-      : '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs();
+      : '<div class="feedback-heading"><strong>文档反馈</strong></div>' + feedbackTabs();
     if (railTab === 'outline') { renderOutline(host); return; }
     // PDF/图片分支的 innerHTML 已含反馈头部，不能再追加一次（v1.2.1 静态回归）
-    if (outlineAvailable) host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong><span>第 ' + (state.round || 0) + ' 轮</span></div>' + feedbackTabs());
+    if (outlineAvailable) host.insertAdjacentHTML('beforeend', '<div class="feedback-heading"><strong>文档反馈</strong></div>' + feedbackTabs());
   }
   const visible = isCanvasMode() ? state.annotations : state.annotations.filter(a => feedbackGroup(a) === feedbackFilter);
   if (!isCanvasMode() && feedbackFilter === 'versions') { renderVersions(host); return; }
@@ -963,7 +972,7 @@ function paintVersions(shell) {
     ${reportHtml(versionState.report)}
     <div class="vp-list" role="list">
       ${list.map(item => `<button role="listitem" class="vp-item${item.id === active.id ? ' active' : ''}" data-vp-id="${escapeHtml(item.id)}">
-        <span class="vp-round">第 ${item.round} 轮</span>
+        <span class="vp-round">版本</span>
         <span class="vp-file">${escapeHtml(item.file)}</span>
         <span class="vp-status" data-status="${item.status}">${statusText[item.status] || item.status}</span>
       </button>`).join('')}
@@ -2299,6 +2308,14 @@ async function loadAnnotations({ rerender = true } = {}) {
   updatePaperWidth();
   renderCards();
   applyTransform();
+  // §1 空侧栏默认关：没有批注的文档不占 300px；用户主动打开的选择在会话内被尊重
+  if (!state.annotations.length && !state.userOpenedCards) {
+    document.body.classList.add("cards-hidden");
+    $("btn-cards").setAttribute("aria-pressed", "true");
+  } else if (state.annotations.length && !localStorage.getItem("coeditor.cardsHidden")) {
+    document.body.classList.remove("cards-hidden");
+    $("btn-cards").setAttribute("aria-pressed", "false");
+  }
   // 版本数轻量预取：让「版本对照」Tab 一开始就显示真实数量，而不是打开过后才正确
   const prefetchEpoch = epoch;
   fetch(`/api/versions?p=${encodeURIComponent(state.path)}`)
@@ -2789,9 +2806,13 @@ function closeComposer() {
 }
 
 async function saveAnnotation() {
+  const savedGroup = (pending && pending.kind) === "highlight" ? "retained" : "pending"; // closeComposer 清 pending，先记
   await flushComposer();
   closeComposer();
   await loadAnnotations({ rerender: false });
+  if (feedbackFilter !== savedGroup) { feedbackFilter = savedGroup; renderCards(); }
+  document.body.classList.remove("cards-hidden"); // 写意见后确保可见（不突然关闭）
+  $("btn-cards").setAttribute("aria-pressed", "false");
   toast("批注已保存");
 }
 
@@ -3054,6 +3075,36 @@ async function saveEdit() {
   state.text = submittedText; // 同步内存文本，loadAnnotations 重渲染才用新内容
   syncStatus("已保存到本地");
   toast("已保存，批注正在重新锚定");
+  // v13：手动修改保留句 → 提示确认并允许「修改并更新保留内容」或「解除保留」，
+  // 旧修订入 history 追溯。不自动解除、不自动改指。
+  const lostRetained = state.annotations.filter(a => a.kind === "highlight" && a.status === "active" && !submittedText.includes(a.quote));
+  if (lostRetained.length) {
+    const actOn = (mutate) => async () => {
+      for (const item of lostRetained) await mutate(item);
+      await loadAnnotations({ rerender: false });
+      toast("保留要求已更新");
+    };
+    // 更新指向：prefix 能在新文本定位时，取其后的行作为新 quote；找不到只能解除
+    setTimeout(() => toast(`检测到 ${lostRetained.length} 处保留句被修改——如何处理？`, [
+      { label: "更新保留指向", fn: actOn(async (item) => {
+          let newQuote = null;
+          if (item.prefix) {
+            const at = submittedText.indexOf(item.prefix);
+            if (at >= 0) {
+              const lineStart = submittedText.indexOf("\n", at) + 1 || at + item.prefix.length;
+              const lineEnd = submittedText.indexOf("\n", lineStart);
+              newQuote = submittedText.slice(lineStart, lineEnd === -1 ? undefined : lineEnd).trim().slice(0, 80);
+            }
+          }
+          if (!newQuote) { // 定位不到新位置：解除并如实说明
+            await patch(item.id, { status: "deprecated", event: "released-after-edit", weight: 0 });
+            return;
+          }
+          await patch(item.id, { quote: newQuote, event: "retargeted-after-edit" });
+        }) },
+      { label: "解除保留", fn: actOn(async (item) => { await patch(item.id, { status: "deprecated", event: "released-after-edit", weight: 0 }); }) },
+    ]), 400);
+  }
   leaveEditUi();
   state.workspaceMode = "read";
   syncWorkspaceModeUi();
@@ -3192,6 +3243,7 @@ $("btn-fit").addEventListener("click", fit);
 /* 右侧反馈栏可折叠：阅读的主体责任是文字本身；隐藏后批注走顶栏「批注」抽屉 */
 /* U04 单一反馈入口：宽屏切换右侧反馈栏，窄屏切换抽屉（同一个面板的两种形态） */
 function toggleFeedbackPanel() {
+  state.userOpenedCards = true; // 用户主动操作后，自动开关不再覆盖其选择
   if (window.innerWidth <= 1180 && !isCanvasMode()) {
     renderDrawer();
     $("drawer").hidden = !$("drawer").hidden;
@@ -3204,6 +3256,7 @@ function toggleFeedbackPanel() {
   if (!isCanvasMode()) { updatePaperWidth(); if (state.fitFollow) fitReadWidth(); }
 }
 $("btn-cards").addEventListener("click", toggleFeedbackPanel);
+$("cards-collapse").addEventListener("click", () => toggleFeedbackPanel()); // §1 头部明确收起钮
 $("btn-canvas-mode").addEventListener("click", () => {
   setWorkspaceMode(isCanvasMode() ? "read" : "canvas");
 });
@@ -3214,26 +3267,55 @@ $("btn-drawer").hidden = true; // U04：入口合并进「反馈」，按钮保�
   const saved = Number(localStorage.getItem("coeditor.cardsWidth"));
   if (Number.isFinite(saved) && saved >= 280 && saved <= 460) document.documentElement.style.setProperty("--cards-w", `${saved}px`);
 })();
+const CARDS_MIN = 240, CARDS_MAX = 420, CARDS_COLLAPSE_BELOW = 200;
+(() => {
+  const saved = Number(localStorage.getItem("coeditor.cardsWidth"));
+  if (Number.isFinite(saved) && saved >= CARDS_MIN && saved <= CARDS_MAX) document.documentElement.style.setProperty("--cards-w", `${saved}px`);
+})();
 $("cards-resizer").addEventListener("pointerdown", (event) => {
   event.preventDefault();
   $("cards-resizer").setPointerCapture(event.pointerId);
   document.body.classList.add("resizing-cards");
   const move = (moveEvent) => {
-    const width = Math.min(460, Math.max(280, window.innerWidth - moveEvent.clientX));
+    // §1：按工作区右边界计算，不用 window.innerWidth（rail 宽/隐藏会影响）
+    const mainRight = $("main").getBoundingClientRect().right;
+    const width = Math.min(CARDS_MAX, Math.max(CARDS_COLLAPSE_BELOW, mainRight - moveEvent.clientX));
+    if (width <= CARDS_COLLAPSE_BELOW + 12) { // 拖过阈值 = 意图收起
+      document.documentElement.style.setProperty("--cards-w", `${CARDS_MIN}px`);
+      document.body.classList.add("cards-hidden");
+      $("btn-cards").setAttribute("aria-pressed", "true");
+      try { localStorage.setItem("coeditor.cardsHidden", "1"); } catch {}
+      return;
+    }
+    document.body.classList.remove("cards-hidden");
+    $("btn-cards").setAttribute("aria-pressed", "false");
     document.documentElement.style.setProperty("--cards-w", `${width}px`);
   };
-  const up = () => {
+  const finish = () => {
     $("cards-resizer").removeEventListener("pointermove", move);
-    $("cards-resizer").removeEventListener("pointerup", up);
-    $("cards-resizer").removeEventListener("pointercancel", up);
+    $("cards-resizer").removeEventListener("pointerup", finish);
+    $("cards-resizer").removeEventListener("pointercancel", finish);
     document.body.classList.remove("resizing-cards");
-    const width = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cards-w")) || 300;
-    localStorage.setItem("coeditor.cardsWidth", String(width));
+    if (!document.body.classList.contains("cards-hidden")) {
+      const width = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cards-w")) || 300;
+      localStorage.setItem("coeditor.cardsWidth", String(width));
+    }
     updatePaperWidth();
   };
   $("cards-resizer").addEventListener("pointermove", move);
-  $("cards-resizer").addEventListener("pointerup", up);
-  $("cards-resizer").addEventListener("pointercancel", up);
+  $("cards-resizer").addEventListener("pointerup", finish);
+  $("cards-resizer").addEventListener("pointercancel", finish);
+  $("cards-resizer").addEventListener("lostpointercapture", finish, { once: true });
+});
+// §1 键盘调节：分隔柄可聚焦，←→ 调宽，Enter 收起/展开
+$("cards-resizer").setAttribute("tabindex", "0");
+$("cards-resizer").setAttribute("role", "separator");
+$("cards-resizer").setAttribute("aria-label", "调整反馈栏宽度（左右箭头调节，回车收起/展开）");
+$("cards-resizer").addEventListener("keydown", (event) => {
+  const cur = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cards-w")) || 300;
+  if (event.key === "ArrowLeft") { document.documentElement.style.setProperty("--cards-w", `${Math.min(CARDS_MAX, cur + 16)}px`); event.preventDefault(); }
+  else if (event.key === "ArrowRight") { document.documentElement.style.setProperty("--cards-w", `${Math.max(CARDS_MIN, cur - 16)}px`); event.preventDefault(); }
+  else if (event.key === "Enter") { toggleFeedbackPanel(); event.preventDefault(); }
 });
 /* 点缩放百分比回到 100%（浏览器习惯） */
 $("zoom").addEventListener("click", () => { if (!isCanvasMode()) { view.zoom = 1; applyTransform(); } });
@@ -3378,7 +3460,7 @@ function renderDrawer() {
     return;
   }
   for (const [r, items] of groups) {
-    html += `<div class="d-round">${r === round ? `第 ${r} 批次 · 进行中` : `第 ${r} 批次 · 历史`}</div>`;
+    html += `<div class="d-round">${r === round ? `当前意见` : `更早的意见`}</div>`;
     html += items.map(itemHtml).join("");
   }
   $("drawer-body").innerHTML = html || '<div class="d-empty">还没有批注 —— 选中文字开始第一条</div>';
@@ -3437,20 +3519,22 @@ $("drawer-copy").addEventListener("click", async () => {
 });
 
 let toastTimer = null;
-function toast(message, action) {
+function toast(message, actions) {
+  // actions: 单函数（=「撤销」）或 [{label, fn}] 数组（多动作，如保留句更新选择）
+  const list = typeof actions === "function" ? [{ label: "撤销", fn: actions }] : actions || [];
   const node = $("toast");
   node.textContent = message;
   node.querySelectorAll(".toast-action").forEach(n => n.remove());
-  if (action) {
+  for (const { label, fn } of list) {
     const btn = document.createElement("button");
     btn.className = "toast-action";
-    btn.textContent = "撤销";
-    btn.addEventListener("click", () => { clearTimeout(toastTimer); node.classList.remove("show"); action(); });
+    btn.textContent = label;
+    btn.addEventListener("click", () => { clearTimeout(toastTimer); node.classList.remove("show"); fn(); });
     node.appendChild(btn);
   }
   node.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove("show"), action ? 8000 : 2600);
+  toastTimer = setTimeout(() => node.classList.remove("show"), list.length ? 10000 : 2600);
 }
 
 /* ---------------- 批次：只有人明确点击才推进，文件 mtime 变化不替人做产品判断 ---------------- */
