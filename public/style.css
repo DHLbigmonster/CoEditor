@@ -37,14 +37,15 @@ body {
 
 /* ---------- 侧栏：无边框，靠背景色差分层 ---------- */
 #rail {
-  width: 264px;
+  /* 规格 §3.2：文件树默认 224px，可调 180–320（宽度由 --rail-width 统一维护） */
+  width: var(--rail-width, 224px);
   flex: none;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   transition: margin-left .22s cubic-bezier(.4, 0, .2, 1);
 }
-body.rail-hidden #rail { margin-left: -264px; }
+body.rail-hidden #rail { margin-left: calc(-1 * var(--rail-width, 224px)); }
 
 .rail-top { padding: 22px 20px 18px; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 550; letter-spacing: .02em; }
@@ -802,7 +803,7 @@ body.paper-dark .note.board { background: linear-gradient(180deg, #2c2822, #241f
 
 /* ================= v0.7 · 阅读 / 编辑 / 画布三态与暖白界面 ================= */
 :root {
-  --rail-width: 280px;
+  --rail-width: 224px;
   --canvas: #ffffff;
   --panel: rgba(249, 249, 249, .97);
   --panel-2: #ffffff;
@@ -1368,6 +1369,8 @@ body[data-workspace-mode="read"] #cards {
 }
 /* 右栏折叠：阅读/编辑模式生效；画布的批注卡是世界坐标元素，不受此开关影响 */
 body.cards-hidden:not([data-workspace-mode="canvas"]) #cards { display: none !important; }
+/* 批注栏收起时，分隔条也必须一起隐藏：否则它仍占布局宽度，把窗口撑出 2px 横向溢出 */
+body.cards-hidden #cards-resizer { display: none !important; }
 body[data-workspace-mode="canvas"].cards-hidden #cards { display: none !important; }
 #btn-cards[aria-pressed="true"] { color: var(--ink); background: rgba(0, 0, 0, .06); }
 /* 点击缩放百分比重置 100% 的可点击暗示 */
@@ -1389,9 +1392,53 @@ body[data-workspace-mode="read"] #page:has(.html-view) { max-width: none; }
 }
 #doc .textLayer span { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
 #doc .textLayer span.mark { color: transparent; }
+/* PDF.js TextLayer geometry (Mozilla, Apache-2.0):
+   https://github.com/mozilla/pdf.js/blob/master/web/text_layer_builder.css */
+#doc .textLayer {
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+}
+#doc .textLayer > span:not(.markedContent),
+#doc .textLayer .markedContent span:not(.markedContent):not(.anchor) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+#doc .textLayer .markedContent { display: contents; }
 #doc .textLayer ::selection { background: rgba(13, 13, 13, .16); }
 #doc .textLayer .endOfContent { position: absolute; inset: 100% 0 0 0; z-index: -1; display: block; user-select: none; }
 #doc .textLayer .endOfContent.active { top: 0; }
+/* PDF 正文批注始终可见。显式指定装饰颜色，避免透明文字层把虚线也变透明。
+   装饰随原文字形排版和缩放，不增加第二份文字，也不引入独立画布坐标。 */
+#doc .pdf-text .anchor[data-kind="comment"] {
+  box-shadow: none;
+  background: transparent;
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: #39805a;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+#doc .pdf-text .anchor[data-kind="comment"][data-status="addressed"] {
+  text-decoration-color: #8b8f8b;
+}
+#doc .pdf-text .anchor[data-kind="comment"][data-status="deprecated"] {
+  text-decoration: none;
+}
+#doc .pdf-text .anchor[data-kind="comment"]:hover,
+#doc .pdf-text .anchor[data-kind="comment"].coeditor-peek {
+  outline: none;
+  background: rgba(57, 128, 90, .08);
+}
+/* wrapRange 的 span 兜底是行内标记，不能继承 PDF 字形容器的绝对定位。 */
+#doc .textLayer span.anchor { position: static; white-space: inherit; }
 /* 渲染失败页：明确错误 + 重试，不留白冒充加载成功 */
 .pdf-page.pdf-paint-error canvas { opacity: .25; }
 .pdf-page .pdf-retry {
@@ -1477,11 +1524,18 @@ body[data-workspace-mode="read"] #cards .card .c-actions button {
   font: 13px/1.6 inherit; color: var(--ink); background: #fff; outline: 0; resize: vertical;
 }
 /* ---------- 右栏反馈栏拖拽调宽（280–460） ---------- */
+/* 分隔条不占布局宽度：批注栏展开 + 窄屏时，原来 flex:0 0 5px / margin:0 -2px 会净占 1–2px，
+   把整行顶出窗口形成横向溢出。改成零宽元素 + 溢出到两边的伪元素热区，
+   拖动命中面积不变，但不再参与宽度计算。 */
 #cards-resizer {
-  flex: 0 0 5px; margin: 0 -2px; cursor: col-resize; z-index: 45;
-  background: transparent; transition: background .12s; align-self: stretch;
+  flex: 0 0 0; width: 0; margin: 0 auto; position: relative;
+  cursor: col-resize; z-index: 45; align-self: stretch;
 }
-#cards-resizer:hover, body.resizing-cards #cards-resizer { background: rgba(0, 0, 0, .12); }
+#cards-resizer::before {
+  content: ""; position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+  background: transparent; transition: background .12s;
+}
+#cards-resizer:hover::before, body.resizing-cards #cards-resizer::before { background: rgba(0, 0, 0, .12); }
 body[data-workspace-mode="read"] #cards { width: var(--cards-w, 300px); flex: 0 0 var(--cards-w, 300px); }
 body.resizing-cards { cursor: col-resize; user-select: none; }
 

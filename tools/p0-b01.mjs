@@ -73,6 +73,19 @@ try {
   const selection = await page.eval(`return String(window.getSelection() || '').trim()`);
   record("真实拖选产生跨行选区", selection.length > 4, `选区=${JSON.stringify(selection.slice(0, 60))} 长度=${selection.length}`);
 
+  // 记下选区在「页面内」的归一化几何：重开后要拿标记的几何跟它比，
+  // 而不是只数"有几个标记"（规格：标记必须落在对应文字下方）
+  const selGeom = await page.eval(`
+    const s = window.getSelection();
+    if (!s.rangeCount) return null;
+    const r = s.getRangeAt(0).getBoundingClientRect();
+    const pg = document.querySelector('#doc .pdf-page[data-page="1"]');
+    if (!pg) return null;
+    const pr = pg.getBoundingClientRect();
+    if (!pr.width || !pr.height) return null;
+    return { x: (r.x - pr.x) / pr.width, y: (r.y - pr.y) / pr.height, w: r.width / pr.width, h: r.height / pr.height };`);
+  record("记录选区几何（供重开后比对）", Boolean(selGeom), JSON.stringify(selGeom));
+
   const menuVisible = await page.eval(`return !document.querySelector('#sel-menu').hidden`);
   record("选区工具条出现", menuVisible);
 
@@ -103,6 +116,12 @@ try {
   const apiHas = JSON.stringify(api).includes(BODY.slice(0, 12));
   record("API 可回读", apiHas, apiHas ? "包含意见正文" : JSON.stringify(api).slice(0, 160));
 
+  // 【一致性之一】落盘的 quote 必须就是刚才选中的那段文字（去空白后逐字相等）
+  const strip = (v) => String(v || "").replace(/\s+/g, "");
+  const savedQuote = (api.annotations || []).filter((a) => (a.body || "").includes(BODY.slice(0, 8))).pop();
+  record("落盘 quote 与选中文本逐字一致", Boolean(savedQuote) && strip(savedQuote.quote) === strip(selection),
+    savedQuote ? `quote长=${savedQuote.quote.length} 选区长=${selection.length} 一致=${strip(savedQuote.quote) === strip(selection)}` : "没找到刚建的这条");
+
   /* ---------- 6. 重新打开（刷新页面）---------- */
   await page.navigate(APP);
   await openDoc(page, DOC);
@@ -127,6 +146,31 @@ try {
     const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return { hitTag: at ? at.tagName : null, hitClass: at ? String(at.className) : null, inside: !!(at && (at === m || m.contains(at) || at.contains(m))) };`);
   record("标记位置与文字重合（未被遮挡/未错位）", Boolean(aligned?.inside), JSON.stringify(aligned));
+
+  // 【一致性之二】重开后标记里的文字 == 落盘的 quote（去空白后相等）
+  const markText = marks.map((m) => m.text).join("");
+  const markFull = await page.eval(`return [...document.querySelectorAll('#doc .pdf-page[data-page="1"] .anchor')]
+    .filter(m => (m.textContent || '').trim()).map(m => m.textContent).join('');`);
+  record("重开后标记文字 == 落盘 quote", Boolean(savedQuote) && strip(markFull) === strip(savedQuote.quote),
+    `标记文字长=${strip(markFull).length} quote长=${strip(savedQuote?.quote || "").length}`);
+
+  // 【一致性之三】标记几何 == 当初选区的几何（页面内归一化，容差 3% 页宽/页高）
+  const markGeom = await page.eval(`
+    const ms = [...document.querySelectorAll('#doc .pdf-page[data-page="1"] .anchor')].filter(m => (m.textContent || '').trim());
+    if (!ms.length) return null;
+    const pg = document.querySelector('#doc .pdf-page[data-page="1"]');
+    const pr = pg.getBoundingClientRect();
+    let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+    for (const m of ms) { const r = m.getBoundingClientRect();
+      x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y); x2 = Math.max(x2, r.right); y2 = Math.max(y2, r.bottom); }
+    return { x: (x1 - pr.x) / pr.width, y: (y1 - pr.y) / pr.height, w: (x2 - x1) / pr.width, h: (y2 - y1) / pr.height };`);
+  const geomOk = Boolean(selGeom && markGeom)
+    && Math.abs(markGeom.y - selGeom.y) <= 0.03
+    && Math.abs(markGeom.x - selGeom.x) <= 0.03
+    && Math.abs(markGeom.w - selGeom.w) <= 0.05
+    && Math.abs(markGeom.h - selGeom.h) <= 0.05;
+  record("重开后标记几何 == 当初选区几何（≤3% 页宽高）", geomOk,
+    `选区=${JSON.stringify(selGeom && { x: +selGeom.x.toFixed(3), y: +selGeom.y.toFixed(3), w: +selGeom.w.toFixed(3), h: +selGeom.h.toFixed(3) })} 标记=${JSON.stringify(markGeom && { x: +markGeom.x.toFixed(3), y: +markGeom.y.toFixed(3), w: +markGeom.w.toFixed(3), h: +markGeom.h.toFixed(3) })}`);
 
   await page.shot(`${OUT}/b01-reopen.png`);
   record("截图存档", true, `${OUT}/b01-reopen.png`);

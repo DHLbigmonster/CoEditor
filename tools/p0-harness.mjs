@@ -48,8 +48,22 @@ export async function openPage(url, { width = 1440, height = 900 } = {}) {
   await send("Network.setCacheDisabled", { cacheDisabled: true }).catch(() => {});
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 
+  // 网络请求留痕：用来断言"组合输入期间不提交""保存失败要显性提示"这类行为
+  const requests = [];
+  listeners.push((msg) => {
+    if (msg.method === "Network.requestWillBeSent") {
+      const r = msg.params?.request || {};
+      requests.push({ url: r.url, method: r.method, data: r.postData || null, at: Date.now() });
+    }
+  });
+
   const page = {
     targetId: created.id,
+    requests,
+    requestsTo: (fragment, method) => requests.filter((r) => r.url.includes(fragment) && (!method || r.method === method)),
+    clearRequests: () => { requests.length = 0; },
+    /** 让某些请求直接失败：验证「保存失败」路径 */
+    async blockUrls(urls) { await send("Network.setBlockedURLs", { urls }); },
     onEvent: (fn) => listeners.push(fn),
     async eval(expression, { awaitPromise = true } = {}) {
       const result = await send("Runtime.evaluate", {
@@ -62,6 +76,10 @@ export async function openPage(url, { width = 1440, height = 900 } = {}) {
         throw new Error(`页面内异常: ${result.exceptionDetails.exception?.description || result.exceptionDetails.text}`);
       }
       return result.result.value;
+    },
+    /** 改视口尺寸（响应式验收用） */
+    async setViewport(width, height = 900) {
+      await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     },
     async navigate(target) {
       await send("Page.navigate", { url: target });
@@ -77,13 +95,23 @@ export async function openPage(url, { width = 1440, height = 900 } = {}) {
       await page.mouse("mouseReleased", x, y, options);
     },
     async drag(from, to, { steps = 12 } = {}) {
-      await page.mouse("mousePressed", from.x, from.y);
+      // buttons: 1 必须带——只给 button 不给 buttons，Chrome 不会把移动当成"按住拖动"，
+      // 于是不会产生真正的拖选，选区只会从上一个光标位置延伸过来（实测过这个坑）
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed", x: Math.round(from.x), y: Math.round(from.y),
+        button: "left", buttons: 1, clickCount: 1,
+      });
       for (let i = 1; i <= steps; i += 1) {
         const t = i / steps;
-        await page.mouse("mouseMoved", from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, { button: "left" });
+        await send("Input.dispatchMouseEvent", {
+          type: "mouseMoved", x: Math.round(from.x + (to.x - from.x) * t), y: Math.round(from.y + (to.y - from.y) * t),
+          button: "left", buttons: 1,
+        });
         await sleep(16);
       }
-      await page.mouse("mouseReleased", to.x, to.y, { button: "left" });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: Math.round(to.x), y: Math.round(to.y), button: "left", buttons: 0, clickCount: 1,
+      });
       await sleep(120);
     },
     /** 捏合缩放（modifiers=2 是 Ctrl 位）。deltaMode: 0=像素 1=行 2=页 */
@@ -108,6 +136,19 @@ export async function openPage(url, { width = 1440, height = 900 } = {}) {
     },
     async type(text) {
       await send("Input.insertText", { text });
+    },
+    /** 输入法组合中（会触发 compositionstart / compositionupdate，但不提交） */
+    async imeCompose(text) {
+      await send("Input.imeSetComposition", {
+        text, selectionStart: text.length, selectionEnd: text.length, replacementStart: 0, replacementEnd: 0,
+      });
+    },
+    /** 结束组合并把候选词落进输入框（触发 compositionend）。
+        实测：imeSetComposition({text:""}) 在这版 Chrome 上不会提交，必须用 insertText 收尾。 */
+    async imeCommit(text = "") {
+      if (text) await send("Input.insertText", { text });
+      else await send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
+      await send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 }).catch(() => {});
     },
     async key(key, { code = "", keyCode = 0, modifiers = 0, type = "keyDown" } = {}) {
       await send("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: keyCode, modifiers });
@@ -165,13 +206,39 @@ export async function openDoc(page, doc) {
   const rowExpr = `const row = document.querySelector('[data-path="${doc}"]');
     if (!row) return null; row.scrollIntoView({ block: 'center' });
     const r = row.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`;
-  const tree = await page.waitFor(rowExpr, { label: "文件树出现" });
+  const switched = `return (document.querySelector('#docpath') ? document.querySelector('#docpath').textContent : '').includes(${JSON.stringify(doc)})`;
+
+  // 打开文档是「测试前置条件」，不是被测功能。失败时留证并明确标注，
+  // 免得和"产品功能失败"混在一起算（规格：两类必须分开报告）。
+  const guard = async (label, fn) => {
+    try { return await fn(); }
+    catch (error) {
+      const shot = "/tmp/coeditor-p0/evidence/precondition-fail.png";
+      let state = "?";
+      try {
+        state = await page.eval(`return JSON.stringify({ docpath: (document.querySelector('#docpath') || {}).textContent,
+          rows: document.querySelectorAll('#tree [data-path]').length,
+          spans: document.querySelectorAll('#doc .pdf-page .textLayer span').length,
+          mode: document.body.dataset.workspaceMode });`);
+        await page.shot(shot);
+      } catch { /* 截图失败不影响抛错 */ }
+      throw new Error(`[前置条件失败] ${label}：${error.message}；现场=${state}；截图=${shot}`);
+    }
+  };
+
+  const tree = await guard("文件树没出现", () => page.waitFor(rowExpr, { label: "文件树出现", timeout: 20000 }));
   await page.clickAt(tree.x, tree.y);
-  await page.waitFor(`return (document.querySelector('#docpath') ? document.querySelector('#docpath').textContent : '').includes(${JSON.stringify(doc)})`,
-    { label: `正文切到 ${doc}` });
+  try {
+    await page.waitFor(switched, { label: `正文切到 ${doc}`, timeout: 12000 });
+  } catch {
+    // 偶发：点击落在行边缘没生效。重读坐标再点一次（仍属前置，不是产品行为）
+    const again = await page.waitFor(rowExpr, { label: "文件树重定位", timeout: 8000 });
+    await page.clickAt(again.x, again.y);
+    await guard(`正文没能切到 ${doc}`, () => page.waitFor(switched, { label: `正文切到 ${doc}`, timeout: 15000 }));
+  }
   // 阈值取 5 而不是 20：1 页的短文档文字层只有十几个 span（实测英文摘要 18 个），
   // 用 20 当门槛会把正常文档误判成「没渲染出来」。
-  await page.waitFor(`return document.querySelectorAll('#doc .pdf-page .textLayer span').length > 5`, { label: "PDF 文字层" });
+  await guard("PDF 文字层没建立", () => page.waitFor(`return document.querySelectorAll('#doc .pdf-page .textLayer span').length > 5`, { label: "PDF 文字层", timeout: 20000 }));
   await waitDocSettled(page);
   return tree;
 }

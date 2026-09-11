@@ -19,8 +19,8 @@
 .feedback-tabs button:focus-visible { outline:2px solid #bb6e56; outline-offset:2px; }
 .feedback-empty { font-size:12px; line-height:1.9; color:#6c7166; padding:12px 6px; }
 /* read 反馈栏布局已并入 style.css（U01 真双栏） */
-body[data-workspace-mode="read"] #cards .card { width:100%; border:1px solid #e2e3da; border-radius:10px; box-shadow:0 3px 9px #34382d06; background:#fffefb; padding:16px; margin-bottom:12px; }
-body[data-workspace-mode="read"] #cards .card.selected { border-color:#b98570; box-shadow:0 2px 9px #a57b5e0d; }
+body[data-workspace-mode="read"] #cards .card { width:100%; border:0; border-bottom:1px solid var(--line); border-radius:0; box-shadow:none; background:transparent; padding:20px 4px; margin:0; }
+body[data-workspace-mode="read"] #cards .card.selected { background:#eef2eb; box-shadow:none; border-color:var(--line); }
 body[data-workspace-mode="read"] #cards .c-actions { opacity:1; }
 body[data-workspace-mode="read"] #cards .c-weight, #drawer .c-weight { display:none; }
 body[data-workspace-mode="read"] #cards .c-body { font-size:13px; line-height:1.85; color:#353930; }
@@ -42,3 +42,92 @@ body[data-workspace-mode="read"] #cards .card[data-status="stale"] { opacity:1; 
  .mode-seg button { padding:6px 8px; }
 }
 @media(prefers-reduced-motion:reduce) { *, *::before, *::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
+
+/* CoEditor editorial shell. Format renderers keep their own geometry. */
+:root {
+ --canvas:#ffffff; --panel:#faf9f6; --panel-2:#ffffff; --panel-3:#efeee9;
+ --ink:#292c28; --ink-dim:#646a61; --ink-faint:#777c73; --line:#e9e9e3;
+ --active:#526b49; --addressed:#526b49; --paper:#ffffff; --paper-ink:#292c28;
+ --rail-width:224px; --shadow-soft:0 4px 18px #252d2110;
+}
+#rail { background:var(--panel); border-right:1px solid var(--line); }
+.rail-top { padding:20px 18px 8px; }
+.brand { height:32px; font:600 24px/1.2 Georgia,serif; letter-spacing:-.6px; }
+.vault { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:16px 0 8px; font-size:11px; }
+#btn-recent { float:none; display:inline-block; margin:0; padding:5px 7px; font-size:11px; border:0; border-radius:5px; background:transparent; }
+#btn-vault { margin:4px 0 0; padding:6px 8px; height:30px; font-size:12px; border:0; background:transparent; text-align:left; }
+#btn-vault:hover, #btn-recent:hover { background:var(--panel-3); }
+.rail-scroll { padding-top:12px; }
+.rail-label { padding:8px 18px; font-size:12px; letter-spacing:0; text-transform:none; }
+#file-search { margin:4px 14px 18px; width:calc(100% - 28px); background:transparent; border-color:#e0e2d9; border-radius:5px; }
+.tree .tree-row { border-radius:5px; min-height:34px; }
+.tree .tree-row.file.current { background:#e9eee4; box-shadow:none; color:#34492e; }
+.tree .file i { opacity:.45; }
+.rail-foot { padding:14px 18px; }
+.rail-foot .hint { display:none; }
+.rail-foot .stat { font-size:11px; color:var(--ink-faint); }
+#bar { height:60px; background:#fff; border-bottom:1px solid var(--line); backdrop-filter:none; padding:0 22px; gap:12px; }
+.doc-title { color:#555b52; font-size:13px; min-width:60px; }
+.bar-tools { gap:6px; }
+.chip,.icon { border-radius:5px; }
+.mode-seg { background:transparent; padding:0; }
+.mode-seg button.active { background:#f2f3ee; box-shadow:none; }
+#save-badge { color:#64755d; font-size:11px; order:-1; }
+body:not(.cards-hidden) #btn-cards { color:#44603c; background:#edf1e8; }
+body.cards-hidden #btn-cards { background:transparent; color:var(--ink-dim); }
+body[data-workspace-mode="read"] #viewport { background:#fff; background-image:none; }
+body[data-workspace-mode="read"] #page:not(:has(.pdf-view,.image-view)) { border-radius:0; box-shadow:none; }
+body[data-workspace-mode="read"] #doc:not(.pdf-view):not(.html-view):not(.image-view):not(.docx-view) { padding:44px 54px 90px; font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; font-size:16px; line-height:1.85; }
+body[data-workspace-mode="read"] #doc:not(.pdf-view):not(.html-view):not(.image-view):not(.docx-view) h1 { font-size:34px; line-height:1.3; letter-spacing:-.7px; margin-bottom:28px; }
+body[data-workspace-mode="read"] #doc:not(.pdf-view):not(.html-view):not(.image-view):not(.docx-view) h2 { font-size:22px; margin-top:34px; border:0; padding:0; }
+body[data-workspace-mode="read"] #cards { background:#fcfcfa; padding:18px 20px 28px; box-shadow:none; border-left:1px solid var(--line); }
+.cards-head { display:flex; align-items:center; justify-content:space-between; padding:0 0 18px; }
+.cards-head strong { font-size:16px; font-weight:550; }
+.feedback-heading { display:none; }
+.feedback-tabs { margin:0 0 4px; padding:0; gap:8px; border-bottom:1px solid var(--line); }
+.feedback-tabs button { border-radius:0; padding:10px 4px; }
+.feedback-tabs button[aria-selected="true"] { background:transparent; color:#48643e; box-shadow:inset 0 -2px #617756; }
+.tabs-more > summary { list-style:none; }
+.tabs-more > summary::-webkit-details-marker { display:none; }
+@media (hover:hover) and (pointer:fine) {
+  body[data-workspace-mode="read"] #cards .card .c-actions { opacity:0; transition:opacity .12s ease; }
+  body[data-workspace-mode="read"] #cards .card:hover .c-actions,
+  body[data-workspace-mode="read"] #cards .card:focus-within .c-actions { opacity:1; }
+}
+.rail-tabs { background:transparent; margin:0 0 10px; }
+.rail-tabs button[aria-selected="true"] { background:#eff1eb; box-shadow:none; }
+body[data-workspace-mode="read"] #cards .c-body { font-size:14px; line-height:1.75; }
+body[data-workspace-mode="read"] #cards .c-quote { font-size:12px; color:#777d73; border-left:0; padding-left:0; margin-top:12px; }
+body[data-workspace-mode="read"] #cards .card::before { display:none; }
+.feedback-empty { padding:28px 0; font-size:13px; color:#777d73; }
+#sel-menu,.anchor-float-card { border-radius:8px; border-color:var(--line); box-shadow:0 4px 18px #202b1914; }
+.retain-gutter-mark { background:#7f9274; border-radius:2px; }
+:focus-visible { outline:2px solid #6d855f; outline-offset:3px; }
+.office-editor { width:min(720px,85vw); max-height:85vh; border:1px solid #e9e9e3; border-radius:12px; padding:24px; color:#292c28; }
+.office-editor::backdrop { background:#252d2140; }
+.office-notice { color:#646a61; font:13px/1.8 system-ui; }
+.office-fields { max-height:50vh; overflow:auto; }
+.office-fields label { display:block; font:12px/1.6 system-ui; margin:16px 0; color:#646a61; }
+.office-fields textarea { display:block; width:100%; box-sizing:border-box; min-height:60px; padding:10px; border:1px solid #ddd; border-radius:5px; font:15px/1.6 system-ui; }
+.office-editor footer { display:flex; justify-content:flex-end; align-items:center; gap:12px; margin-top:20px; }
+.office-editor [role=status] { color:#a33; font-size:12px; }
+.office-text-preview { padding:32px; }
+.office-text-preview section { margin:30px 0; border-top:1px solid #e9e9e3; padding-top:12px; }
+body[data-workspace-mode="read"] #doc.pptx-view-host { padding:20px; width:100%; box-sizing:border-box; font:14px/1.6 system-ui; }
+.pptx-view { width:100%; min-width:0; }
+.pptx-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:16px; font-size:12px; color:#646a61; }
+.pptx-head button { border:0; background:#eff1eb; color:#394c31; padding:6px 9px; border-radius:5px; cursor:pointer; }
+.pptx-warning { width:100%; overflow-wrap:anywhere; }
+.pptx-body { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.pptx-rail { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; }
+.slide-thumb { position:relative; flex:0 0 110px; width:110px; padding:4px; border:1px solid #e1e4dc; border-radius:5px; background:#fff; cursor:pointer; }
+.slide-thumb.active { border-color:#617756; box-shadow:0 0 0 1px #617756; }
+.st-no { display:block; font-size:11px; color:#646a61; }
+.st-canvas canvas { max-width:100%; height:auto!important; display:block; }
+.pptx-stage { min-width:0; width:100%; }
+.slide-frame { position:relative; margin:auto; box-shadow:0 3px 18px #202b1914; }
+.slide-canvas canvas { display:block; }
+body.paper-dark[data-workspace-mode="read"] #viewport { background:#242720; }
+body.paper-dark[data-workspace-mode="read"] #page:not(:has(.pdf-view,.image-view)) { background:#292c26; color:#e3e6dc; }
+@media(max-width:1100px) { #bar { padding:0 12px; gap:6px; } #save-badge { max-width:105px; overflow:hidden; text-overflow:ellipsis; } #btn-fit { padding:0 6px; } }
+@media(max-width:760px) { #save-badge { display:none; } #bar { height:54px; } body[data-workspace-mode="read"] #doc:not(.pdf-view):not(.html-view):not(.image-view):not(.docx-view) { padding:30px 28px 64px; } }

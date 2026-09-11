@@ -3008,6 +3008,26 @@ function anchorPayload(source) {
   };
 }
 
+/** 把 range 裁进 root；起点不在正文内时返回 null（= 这次拖选不算正文选区）。
+ *
+ *  只裁尾巴、绝不裁头。为什么：起点在正文之外时（例如从顶栏或页边空白按下去往正文里拖），
+ *  若把起点补成「文档开头」，就会把整段文档吞成一条批注——实测过，这是比"没有批注"更坏的结果。
+ *  终点在正文之外（从正文里往外拖）则是合理意图，夹到文档末尾即可。 */
+function clampRangeToRoot(root, range) {
+  const inside = (node) => Boolean(node) && (node === root || root.contains(node));
+  if (!inside(range.startContainer)) return null;
+  const out = range.cloneRange();
+  if (!inside(out.endContainer)) out.setEnd(root, root.childNodes.length);
+  return out.collapsed ? null : out;
+}
+
+/** 节点所属的 .pdf-page（没有则 null） */
+function pageOfNode(node) {
+  if (!node) return null;
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  return el && el.closest ? el.closest(".pdf-page") : null;
+}
+
 /** 从 root 起算，(node, offset) 在原文里的字符偏移；不在 root 内返回 -1 */
 function offsetWithin(root, node, offset) {
   if (!node) return -1;
@@ -3027,9 +3047,15 @@ function captureTextSelection(root, selection, rectOffset = { left: 0, top: 0 })
   if (state.mode === "image") return; // 图片走区域框选，不参与文字选区
   if (state.canvasTool === "region") return; // 区域工具拖框中：不触发文字浮条（且不 stopPropagation 挡掉 region 的 mouseup 监听）
   if (document.body.classList.contains("editing-doc")) return; // 编辑态由 textarea 自己处理
-  const text = String(selection).trim();
-  if (!text || !root.contains(selection.anchorNode) || !selection.rangeCount) { hideSelMenu(); return; }
-  const range = selection.getRangeAt(0);
+  if (!selection || !selection.rangeCount) { hideSelMenu(); return; }
+  /* 选区先与文档求交集再采信（A04 实测根因）：
+     跨页拖选时浏览器可能把 anchor 放在顶栏（#docpath）而只把 focus 落在正文里，
+     旧代码用 `root.contains(selection.anchorNode)` 一票否决，整个选区被丢掉——
+     表现就是"跨页选完没有批注按钮"。改成取交集：文档外的部分裁掉，文档内的部分照常可用。 */
+  const range = clampRangeToRoot(root, selection.getRangeAt(0));
+  if (!range) { hideSelMenu(); return; } // 起点在正文之外：不当成正文选区，宁可不出批注按钮
+  const text = String(range).trim();
+  if (!text) { hideSelMenu(); return; }
   const owner = root.ownerDocument || document;
   const before = owner.createRange();
   before.setStart(root, 0);
@@ -3048,10 +3074,10 @@ function captureTextSelection(root, selection, rectOffset = { left: 0, top: 0 })
   };
   // 精确定位信息：页号 + 页内原始偏移 + 该页文本指纹。
   // 指纹一致时直接按偏移落点（零猜测）；内容变了指纹就对不上，自动退回规范化搜索。
-  const anchorEl = selection.anchorNode
-    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
-    : null;
-  const pageEl = anchorEl ? anchorEl.closest(".pdf-page") : null;
+  // 跨页选区按整篇建索引：按页搜会把跨页的 quote 切成两半，永远搜不到
+  const startPage = pageOfNode(range.startContainer);
+  const endPage = pageOfNode(range.endContainer);
+  const pageEl = startPage && startPage === endPage ? endPage : null;
   const scopeRoot = pageEl || root;
   const startOffset = offsetWithin(scopeRoot, range.startContainer, range.startOffset);
   const endOffset = offsetWithin(scopeRoot, range.endContainer, range.endOffset);
@@ -3839,12 +3865,8 @@ $("btn-canvas-mode").addEventListener("click", () => {
 });
 try { if (localStorage.getItem("coeditor.cardsHidden") === "1") { document.body.classList.add("cards-hidden"); $("btn-cards").setAttribute("aria-pressed", "true"); } } catch {}
 $("btn-drawer").hidden = true; // U04：入口合并进「反馈」，按钮保留供旧脚本兼容
-// 反馈栏拖拽调宽（280–460），记忆在本地
-(() => {
-  const saved = Number(localStorage.getItem("coeditor.cardsWidth"));
-  if (Number.isFinite(saved) && saved >= 280 && saved <= 460) document.documentElement.style.setProperty("--cards-w", `${saved}px`);
-})();
-const CARDS_MIN = 240, CARDS_MAX = 420, CARDS_COLLAPSE_BELOW = 200;
+// 反馈栏拖拽调宽（规格 §3.2：240–400，默认 300），记忆在本地
+const CARDS_MIN = 240, CARDS_MAX = 400, CARDS_COLLAPSE_BELOW = 200;
 (() => {
   const saved = Number(localStorage.getItem("coeditor.cardsWidth"));
   if (Number.isFinite(saved) && saved >= CARDS_MIN && saved <= CARDS_MAX) document.documentElement.style.setProperty("--cards-w", `${saved}px`);
@@ -3856,8 +3878,11 @@ $("cards-resizer").addEventListener("pointerdown", (event) => {
   const move = (moveEvent) => {
     // §1：按工作区右边界计算，不用 window.innerWidth（rail 宽/隐藏会影响）
     const mainRight = $("main").getBoundingClientRect().right;
-    const width = Math.min(CARDS_MAX, Math.max(CARDS_COLLAPSE_BELOW, mainRight - moveEvent.clientX));
-    if (width <= CARDS_COLLAPSE_BELOW + 12) { // 拖过阈值 = 意图收起
+    const raw = mainRight - moveEvent.clientX;
+    // 收起判定用「指针原始位置」，宽度夹紧用 240–400：
+    // 旧代码把夹紧下限写成收起阈值(200)，于是能拖到 200–240 这段规格外宽度
+    const width = Math.min(CARDS_MAX, Math.max(CARDS_MIN, raw));
+    if (raw <= CARDS_COLLAPSE_BELOW) { // 拖过阈值 = 意图收起
       document.documentElement.style.setProperty("--cards-w", `${CARDS_MIN}px`);
       document.body.classList.add("cards-hidden");
       $("btn-cards").setAttribute("aria-pressed", "true");
@@ -3918,19 +3943,44 @@ $("btn-lines").addEventListener("click", (event) => {
 });
 $("rail-toggle").addEventListener("click", () => {
   document.body.classList.toggle("rail-hidden");
+  railAutoCollapsed = false; // 用户自己动过，就不再替他自动展开
   setTimeout(applyTransform, 240);
 });
 
+/* 规格 §3.2：窄于 1100px 先折叠文件树；宽回来时只在「是系统自动收的」情况下自动展开。
+   全屏手动收起不会被窗口一宽一窄来回翻开。 */
+const NARROW_BREAK = 1100;
+let railAutoCollapsed = false;
+function applyNarrowLayout() {
+  const narrow = window.innerWidth < NARROW_BREAK;
+  const hidden = document.body.classList.contains("rail-hidden");
+  if (narrow && !hidden) {
+    railAutoCollapsed = true;
+    document.body.classList.add("rail-hidden");
+    setTimeout(applyTransform, 240);
+  } else if (!narrow && hidden && railAutoCollapsed) {
+    railAutoCollapsed = false;
+    document.body.classList.remove("rail-hidden");
+    setTimeout(applyTransform, 240);
+  }
+}
+window.addEventListener("resize", applyNarrowLayout);
+applyNarrowLayout();
+
 /* 侧栏像编辑器一样可拖动，宽度只保存在本机浏览器。 */
+// 规格 §3.2：文件树 180–320（默认 224），批注栏 240–400（默认 300）
+const RAIL_MIN = 180, RAIL_MAX = 320;
 const savedRailWidth = Number(localStorage.getItem("coeditor.railWidth"));
-if (Number.isFinite(savedRailWidth)) document.documentElement.style.setProperty("--rail-width", `${Math.min(480, Math.max(220, savedRailWidth))}px`);
+if (Number.isFinite(savedRailWidth)) {
+  document.documentElement.style.setProperty("--rail-width", `${Math.min(RAIL_MAX, Math.max(RAIL_MIN, savedRailWidth))}px`);
+}
 $("rail-resizer").addEventListener("pointerdown", (event) => {
   if (document.body.classList.contains("rail-hidden")) return;
   event.preventDefault();
   $("rail-resizer").setPointerCapture(event.pointerId);
   document.body.classList.add("resizing-rail");
   const move = (moveEvent) => {
-    const width = Math.min(480, Math.max(220, moveEvent.clientX));
+    const width = Math.min(RAIL_MAX, Math.max(RAIL_MIN, moveEvent.clientX));
     document.documentElement.style.setProperty("--rail-width", `${width}px`);
     localStorage.setItem("coeditor.railWidth", String(Math.round(width)));
     applyTransform();
