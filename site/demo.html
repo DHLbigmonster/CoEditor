@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>试着批注一段 · CoEditor 演示</title>
+<meta name="description" content="CoEditor 的交互演示：选中一句话，写批注、标记保留或提出删除，看要求如何留在原文上。合成材料，数据不离开这个页面。" />
+<meta property="og:title" content="试着批注一段 · CoEditor 演示" />
+<meta property="og:image" content="assets/og.png" />
+<link rel="icon" href="assets/logo.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" />CoEditor</a>
+    <nav class="nav-links">
+      <a href="index.html#product">产品</a>
+      <a href="index.html#how">使用方法</a>
+      <a href="help.html">帮助</a>
+      <a class="nav-cta" href="https://github.com/DHLbigmonster/CoEditor">在 GitHub 获取</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap" style="padding-top:44px">
+    <h2 style="margin-bottom:8px">试着批注一段</h2>
+    <p class="sec-lead">
+      下面是一份合成文档。用鼠标选中任意一句话，然后决定它是「要改」「要留」还是「要删」。
+      这是真交互，不是录屏。
+    </p>
+
+    <p class="note" style="margin-bottom:18px">
+      <b>演示边界：</b>这里没有真实的 AI 在改稿，也没有读取你的本地文件。
+      你写的东西只存在这个标签页里，刷新即重置。完整版在你自己机器上运行（见
+      <a href="index.html#how">开始使用</a>）。
+    </p>
+
+    <div class="toolbar">
+      <span class="pill" id="demo-count">0 条意见</span>
+      <span class="pill" id="demo-hint">提示：先选中一句话</span>
+      <button class="btn btn-ghost grow" id="demo-reset" type="button" style="padding:6px 13px;font-size:14px">重置演示</button>
+    </div>
+
+    <div class="demo-shell" id="demo-shell">
+      <div class="demo-doc" id="demo-doc">
+        <h3>山月斋门店数字化试点 · 阶段简报</h3>
+        <div class="meta">合成文档 · 虚构品牌 · 仅供演示</div>
+        <p>试点覆盖华东区 86 家门店，其中 42 家完成智能排班与自动补货上线。</p>
+        <p>门店按城市线级分层抽样，写字楼商圈的样本量在此处需要补充口径说明。</p>
+        <p>样本覆盖 1,208 家门店，季度观测值 3,842 条，已剔除开业不足三个月与季度内闭店的门店。</p>
+        <p>上季度坪效提升 12.4%，但该数字与附录表 4 的口径不一致，建议核对后再对外引用。</p>
+      </div>
+      <aside class="demo-rail">
+        <h4>批注</h4>
+        <div id="demo-list"><div class="demo-empty">还没有意见。选中左边任意一句话开始。</div></div>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<div class="sel-menu" id="sel-menu" hidden>
+  <button type="button" data-act="comment">批注</button>
+  <button type="button" data-act="retain">保留</button>
+  <button type="button" data-act="strike">删除线</button>
+</div>
+
+<div class="composer" id="composer" hidden>
+  <textarea id="composer-input" rows="3" placeholder="希望这里怎么改？"></textarea>
+  <div class="row">
+    <span class="hint">⌘/Ctrl + Enter 保存</span>
+    <button class="btn btn-ghost" type="button" id="composer-cancel" style="padding:5px 12px;font-size:13px">取消</button>
+    <button class="btn btn-primary" type="button" id="composer-save" style="padding:5px 14px;font-size:13px">保存</button>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div>CoEditor © 2026 · 演示使用合成材料，不含任何真实个人数据。</div>
+  </div>
+</footer>
+
+<script>
+/* 纯前端演示：只用 Range/doc 操作模拟产品里的三种标记与右栏列表。
+   刻意不联网、不写 localStorage —— 刷新即重置，避免"演示数据"变成"用户数据"。 */
+(function () {
+  const doc = document.getElementById('demo-doc');
+  const list = document.getElementById('demo-list');
+  const menu = document.getElementById('sel-menu');
+  const composer = document.getElementById('composer');
+  const input = document.getElementById('composer-input');
+  const countEl = document.getElementById('demo-count');
+  const hintEl = document.getElementById('demo-hint');
+  const ORIGINAL = doc.innerHTML;
+
+  let items = [];       // { id, kind, body, quote, marks: [el] }
+  let seq = 0;
+  let pending = null;   // { range, quote }
+  let editing = null;
+
+  const KIND_CLASS = { comment: 'mark-dashed', retain: 'mark-retain', strike: 'mark-strike' };
+
+  function refresh() {
+    countEl.textContent = items.length + ' 条意见';
+    hintEl.textContent = items.length ? '试试点右栏的「已处理」' : '提示：先选中一句话';
+    if (!items.length) list.innerHTML = '<div class="demo-empty">还没有意见。选中左边任意一句话开始。</div>';
+  }
+
+  function renderList() {
+    if (!items.length) { refresh(); return; }
+    list.innerHTML = '';
+    for (const it of items) {
+      const card = document.createElement('div');
+      card.className = 'demo-card' + (it.done ? ' done' : '');
+      const label = it.kind === 'retain' ? '保留' : it.kind === 'strike' ? '删除线' : '';
+      card.innerHTML =
+        (label ? '<span style="color:#62675f;font-size:12px">' + label + '</span> ' : '') +
+        '<span class="body"></span><div class="q"></div>';
+      card.querySelector('.body').textContent = it.body || '（无说明）';
+      card.querySelector('.q').textContent = it.quote;
+      const row = document.createElement('div');
+      row.className = 'row';
+      const done = document.createElement('button');
+      done.type = 'button';
+      done.textContent = it.done ? '恢复为待办' : '已处理';
+      done.addEventListener('click', () => {
+        it.done = !it.done;
+        it.marks.forEach((m) => m.classList.toggle('is-done', it.done));
+        renderList();
+      });
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '删除';
+      del.addEventListener('click', () => {
+        it.marks.forEach((m) => {
+          const parent = m.parentNode;
+          while (m.firstChild) parent.insertBefore(m.firstChild, m);
+          parent.removeChild(m);
+          parent.normalize();
+        });
+        items = items.filter((x) => x !== it);
+        renderList();
+      });
+      row.append(done, del);
+      card.appendChild(row);
+      list.appendChild(card);
+    }
+    refresh();
+  }
+
+  function hideMenu() { menu.hidden = true; }
+  function hideComposer() { composer.hidden = true; editing = null; input.value = ''; }
+
+  /** 把选中的 Range 用 <span> 包起来，返回创建出来的片段 */
+  function wrap(range, className) {
+    const spans = [];
+    const nodes = [];
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      if (range.intersectsNode(n)) nodes.push(n);
+    }
+    for (const node of nodes) {
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end <= start) continue;
+      const piece = document.createRange();
+      piece.setStart(node, start);
+      piece.setEnd(node, end);
+      const span = document.createElement('span');
+      span.className = className;
+      try { piece.surroundContents(span); } catch { span.appendChild(piece.extractContents()); piece.insertNode(span); }
+      spans.push(span);
+    }
+    return spans;
+  }
+
+  function currentSelectionRange() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if (!doc.contains(range.startContainer) || !doc.contains(range.endContainer)) return null;
+    const text = String(range).trim();
+    if (!text) return null;
+    return { range: range.cloneRange(), quote: text };
+  }
+
+  doc.addEventListener('mouseup', () => {
+    const picked = currentSelectionRange();
+    if (!picked) { hideMenu(); return; }
+    pending = picked;
+    const rect = pending.range.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.top = (window.scrollY + rect.top - 46) + 'px';
+    menu.style.left = (window.scrollX + Math.max(12, Math.min(rect.left, window.innerWidth - 220))) + 'px';
+  });
+
+  document.addEventListener('mousedown', (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) hideMenu();
+    if (!composer.hidden && !composer.contains(e.target)) hideComposer();
+  });
+
+  menu.addEventListener('click', (e) => {
+    const act = e.target.dataset.act;
+    if (!act || !pending) return;
+    hideMenu();
+    if (act === 'comment') {
+      editing = pending;
+      const rect = pending.range.getBoundingClientRect();
+      composer.hidden = false;
+      composer.style.top = (window.scrollY + rect.bottom + 10) + 'px';
+      composer.style.left = (window.scrollX + Math.max(12, Math.min(rect.left, window.innerWidth - 340))) + 'px';
+      input.value = '';
+      input.focus();
+      return;
+    }
+    // 保留 / 删除线：一键完成，不需要写说明（和产品一致）
+    const marks = wrap(pending.range, KIND_CLASS[act]);
+    items.push({ id: ++seq, kind: act, body: '', quote: pending.quote, marks, done: false });
+    window.getSelection().removeAllRanges();
+    pending = null;
+    renderList();
+  });
+
+  document.getElementById('composer-cancel').addEventListener('click', hideComposer);
+  document.getElementById('composer-save').addEventListener('click', () => {
+    const body = input.value.trim();
+    if (!body || !editing) { hideComposer(); return; }
+    const marks = wrap(editing.range, KIND_CLASS.comment);
+    items.push({ id: ++seq, kind: 'comment', body, quote: editing.quote, marks, done: false });
+    window.getSelection().removeAllRanges();
+    hideComposer();
+    pending = null;
+    renderList();
+  });
+  input.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') document.getElementById('composer-save').click();
+    if (e.key === 'Escape') hideComposer();
+  });
+
+  document.getElementById('demo-reset').addEventListener('click', () => {
+    doc.innerHTML = ORIGINAL;
+    items = [];
+    pending = null;
+    hideMenu();
+    hideComposer();
+    renderList();
+  });
+
+  window.addEventListener('resize', hideMenu);
+  renderList();
+})();
+</script>
+</body>
+</html>

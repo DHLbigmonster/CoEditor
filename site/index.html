@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CoEditor · 把想法留在原文里</title>
+<meta name="description" content="在 Agent 浏览器侧边栏里阅读、编辑本地文档，用批注告诉 AI 下一步怎么改、改完如何验收。批注长期保存在本地，供已接入的 Agent 跨会话读取。" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="CoEditor · 把想法留在原文里" />
+<meta property="og:description" content="本地优先的文档批注层：给 AI 的修改意见，不再丢在聊天记录里。" />
+<meta property="og:image" content="assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="assets/logo.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" />CoEditor</a>
+    <nav class="nav-links">
+      <a href="#product">产品</a>
+      <a href="#how">使用方法</a>
+      <a href="help.html">帮助</a>
+      <a href="demo.html">演示</a>
+      <!-- 有真实安装包之后再换成下载地址；现在指向仓库，绝不指向空文件 -->
+      <a class="nav-cta" href="https://github.com/DHLbigmonster/CoEditor" data-cta="get">在 GitHub 获取</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <div class="wrap hero">
+    <h1>把想法留在原文里。</h1>
+    <p class="lead">打开本地文档，直接批注、保留或修改。连接你的 AI 工具，让后续改稿也能读到这些要求。</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="https://github.com/DHLbigmonster/CoEditor" data-cta="get">在 GitHub 获取</a>
+      <a class="btn btn-ghost" href="demo.html">试着批注一段</a>
+    </div>
+    <p class="sub">本地文件 · 多格式批注 · 可追溯的修改意见<br />
+      <span style="color:var(--amber)">首个公开测试版正在准备，暂无预编译安装包——一条 Node 命令即可启动。</span></p>
+
+    <div class="hero-shot">
+      <img src="assets/app-reading.png" width="1440" height="900"
+           alt="CoEditor 阅读界面：左侧文件树，中间文档正文，右侧批注栏；正文里有一条绿色虚线的批注标记" />
+    </div>
+  </div>
+
+  <section id="product">
+    <div class="wrap">
+      <h2>三个动作就够了</h2>
+      <p class="sec-lead">选中一句话，然后决定它是「要改」「要留」还是「要删」。不需要学编号、批次或提示词。</p>
+      <div class="grid3">
+        <div class="card">
+          <h3>写批注</h3>
+          <p>在原文上指出哪里要改。<span class="m-comment">正文出现绿色虚线</span>，右侧出现一条意见卡，停手就自动保存。</p>
+        </div>
+        <div class="card">
+          <h3>标记保留</h3>
+          <p>这段写得好、不要动。<span class="m-retain">极淡的暖黄底</span>，不额外划线；Agent 改稿时不得删除或改写它。</p>
+        </div>
+        <div class="card">
+          <h3>提出删除</h3>
+          <p>建议删掉这一句。<span class="m-strike">克制的删除线</span>，正文仍然可读——这是建议，不是真的删掉文件内容。</p>
+        </div>
+      </div>
+      <p class="sec-lead" style="margin-top:26px">
+        实例（下面这段就是三种标记的真实样子）：
+      </p>
+      <div class="card mark-demo">
+        门店按城市线级分层抽样，<span class="m-comment">写字楼商圈的样本量在此处需要补充口径说明</span>。
+        <span class="m-retain">样本覆盖 1,208 家门店，季度观测值 3,842 条</span>。
+        <span class="m-strike">原表 4 的数据与正文不一致，建议整体删除。</span>
+        其余结论保持原样。
+      </div>
+    </div>
+  </section>
+
+  <section id="persist">
+    <div class="wrap">
+      <h2>改过之后，要求还在</h2>
+      <p class="sec-lead">意见不是聊天记录，是随文档走的资产。关掉窗口、换个会话、隔几周再回来，它们都还在。</p>
+      <div class="grid3">
+        <div class="card">
+          <h3>已处理的会变灰</h3>
+          <p><span class="m-done">这一句已经被改过了</span>，标记变灰但不消失；历史保留，随时能翻回去看当初为什么这么改。</p>
+        </div>
+        <div class="card">
+          <h3>保留是长期的</h3>
+          <p>「保留」不会因为改完一轮就失效。下一轮改稿时，它仍然作为硬约束下发给 Agent。</p>
+        </div>
+        <div class="card">
+          <h3>找不到原文会说清楚</h3>
+          <p>句子被整段替换掉时不乱画线、不假装成功，而是标成「原文已变化」等你确认。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="formats">
+    <div class="wrap">
+      <h2>你的文件，继续用原来的格式</h2>
+      <p class="sec-lead">
+        跨格式的承诺是<b>统一的批注体验</b>，不是「每种格式都能随便改」。下面是真实边界，不是宣传语。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>格式</th><th>阅读</th><th>编辑</th><th>边界</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Markdown / TXT</td><td class="yes">支持</td><td class="yes">全文编辑</td><td>保存有版本锁，外部改过会被拒绝而不是覆盖</td></tr>
+            <tr><td>HTML</td><td class="yes">原布局，隔离渲染</td><td class="yes">源码 + 就地改字</td><td>不执行脚本，外链资源默认阻断</td></tr>
+            <tr><td>JSON / CSV</td><td class="yes">支持</td><td class="yes">支持</td><td>—</td></tr>
+            <tr><td>PDF</td><td class="yes">连续页 + 文字层</td><td class="no">不做 PDF 原文编辑</td><td>只做批注 / 保留 / 删除建议；扫描件只能框选区域（不做 OCR）</td></tr>
+            <tr><td>DOCX</td><td class="yes">尽力还原布局</td><td class="yes">文字替换</td><td>复杂表格 / 页眉脚不保证不变形，未知结构降级处理</td></tr>
+            <tr><td>PPTX</td><td class="yes">文字模式</td><td class="yes">文字替换</td><td><b>完整幻灯片排版预览需要可选的本地组件（LibreOffice）</b>，不随包提供、不自动安装</td></tr>
+            <tr><td>图片</td><td class="yes">原比例</td><td class="no">—</td><td>区域批注，坐标按缩放归一化保存</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note" style="margin-top:20px">
+        <b>关于 PPT：</b>没装可选组件时，PPT 走文字模式——可以读文字、改文字、批注，但没有逐页排版预览。
+        我们不假装「PPT 完整支持」。
+      </p>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>开始只需打开文件夹</h2>
+      <p class="sec-lead">要求 Node.js ≥ 18。<b>不需要 npm install</b> —— 运行时依赖已经随仓库带走。</p>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <b>取到代码</b>
+            <pre>git clone https://github.com/DHLbigmonster/CoEditor.git
+cd CoEditor</pre>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <b>指向你的本地文件夹</b>
+            <pre>node server.mjs ~/Documents</pre>
+            终端会打印一个 <code class="inline">127.0.0.1</code> 地址，用浏览器打开即可。
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <b>已有 AI 工具？连接一次即可</b>
+            左下角点「连接 Agent」，把给出的 MCP 配置粘到你的 Agent 里。之后每次改稿，
+            它都会读到这些批注。<br />
+            <span style="color:var(--ink-faint);font-size:13.5px">
+              状态灯的含义：<b>连接 Agent</b>（还没接过）→ <b>等待 Agent 读取</b>（配置已就绪）→
+              <b>已连接</b>（确实有 Agent 读过批注）。
+            </span>
+          </div>
+        </div>
+      </div>
+      <p class="note" style="margin-top:22px">
+        <b>别误会：</b>装好 CoEditor 并不会让「任何 AI 自动知道你打开了哪个目录」。
+        你需要按上面的方式连接一次；不连接也能正常阅读和批注。
+      </p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>常见问题</h2>
+      <div style="margin-top:26px">
+        <details class="faq"><summary>会把我的文件上传到服务器吗？</summary>
+          <p>不会。本地服务只监听 <code class="inline">127.0.0.1</code>，不联网、不上传。批注写在你自己文档目录下的
+            <code class="inline">.marginalia/annotations.json</code> 里。</p></details>
+        <details class="faq"><summary>它内置 AI 吗？</summary>
+          <p>不内置。CoEditor 负责「人在原文上留下要求」，执行改稿的是你自己的 Agent。没有连接 Agent 时，阅读和批注照常可用。</p></details>
+        <details class="faq"><summary>支持哪些 Agent？</summary>
+          <p>通过 MCP 接入。MCP 服务在本地实测过握手与工具列表，但我们<b>还没有在真实宿主的图形界面里端到端点通</b>，
+            所以不声称「兼容所有 Agent」。接入方式对任何支持 MCP 的客户端都是同一份配置。</p></details>
+        <details class="faq"><summary>PPT 为什么还需要额外组件？</summary>
+          <p>PPT 是二进制版式格式，完整排版还原需要一整套转换器。我们不想把它塞进安装包（体积和信任成本都太高），
+            所以做成可选：不装就走文字模式，装了才有逐页排版预览。</p></details>
+        <details class="faq"><summary>能直接改 PDF 吗？</summary>
+          <p>不能，这是有意的。PDF 保持只读，你只能在上面写批注 / 保留 / 删除建议，改动交给 Agent 落到源文件上。</p></details>
+        <details class="faq"><summary>删掉 CoEditor，我的批注还在吗？</summary>
+          <p>在。批注写在文档目录的 sidecar 文件里，不在应用内部。删掉应用不会删掉文档和批注。</p></details>
+        <details class="faq"><summary>不连接 Agent 能用吗？</summary>
+          <p>能。阅读、编辑、批注、保留、历史全部可用；只是这些要求不会被自动带给 Agent。</p></details>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h4>产品</h4>
+        <ul>
+          <li><a href="#product">三个动作</a></li>
+          <li><a href="#formats">格式能力</a></li>
+          <li><a href="demo.html">在线演示</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>使用</h4>
+        <ul>
+          <li><a href="help.html">帮助</a></li>
+          <li><a href="#how">开始使用</a></li>
+          <li><a href="changelog.html">更新记录</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>其他</h4>
+        <ul>
+          <li><a href="privacy.html">隐私</a></li>
+          <li><a href="https://github.com/DHLbigmonster/CoEditor">GitHub 仓库</a></li>
+        </ul>
+      </div>
+    </div>
+    <div>CoEditor © 2026 · 本页演示与截图均使用合成材料，不含任何真实个人数据。</div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>更新记录 · CoEditor</title>
+<meta name="description" content="CoEditor 各版本的变更与已知限制。" />
+<meta property="og:title" content="更新记录 · CoEditor" />
+<meta property="og:image" content="assets/og.png" />
+<link rel="icon" href="assets/logo.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/logo.svg" alt="" />CoEditor</a>
+    <nav class="nav-links">
+      <a href="index.html#product">产品</a>
+      <a href="index.html#how">使用方法</a>
+      <a href="help.html">帮助</a>
+      <a href="demo.html">演示</a>
+      <a class="nav-cta" href="https://github.com/DHLbigmonster/CoEditor">在 GitHub 获取</a>
+    </nav>
+  </div>
+</header>
+<main><div class="wrap" style="padding-top:48px;padding-bottom:72px">
+
+<h2>更新记录</h2>
+<p class="sec-lead">只列真实发布过的版本。完整历史见
+  <a href="https://github.com/DHLbigmonster/CoEditor/blob/main/CHANGELOG.md">仓库里的 CHANGELOG</a>。</p>
+
+<div class="card" style="margin-top:24px">
+  <h3 style="margin-top:0">v1.6.0 · 首个公开测试版 <span style="font-size:13px;color:var(--ink-faint)">（准备中）</span></h3>
+  <ul style="margin:8px 0 0;padding-left:20px;color:var(--ink-dim);font-size:14.5px">
+    <li>批注入口改成日常语言；左栏改为「连接 Agent」状态灯。</li>
+    <li>修掉三处阻塞：原文看不到批注、右栏点击不可靠、触控板缩放漂移与卡顿。</li>
+    <li>缩放改为「同步改尺寸 + 位图异步锐化」，不再每次重建页面。</li>
+    <li>运行时依赖内置化，补丁：<code class="inline">npm install</code> 不再必需。</li>
+  </ul>
+  <p style="margin:12px 0 0;font-size:13.5px;color:var(--ink-faint)">
+    已知限制：尚未在真实宿主 Agent 的图形界面里端到端验证；PPT 完整排版预览需要可选的本地组件。
+  </p>
+</div>
+
+</div></main>
+<footer><div class="wrap"><div>CoEditor © 2026 · 本页内容如实描述当前能力，不含虚构的用户数、客户或推荐语。</div></div></footer>
+</body>
+</html>

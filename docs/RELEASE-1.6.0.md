@@ -146,6 +146,31 @@ gh repo edit --add-topic ai-agents,human-in-the-loop,document-review,document-an
 
 ---
 
+## 9. 官网（路线图第 6 步，已完成本地版本）
+
+位置：仓库内 `site/`，**纯静态、无构建、无第三方脚本**，与本地文件服务分开部署。
+
+| 页面 | 内容 |
+|---|---|
+| `index.html` | 首屏「把想法留在原文里。」＋三个动作＋要求会留下＋格式能力表（含边界）＋三步上手＋FAQ（7 条） |
+| `demo.html` | 可交互演示：选中 → 批注 / 保留 / 删除线 → 右栏意见卡 →「已处理」变灰 →「重置演示」 |
+| `download.html` | 获取方式与「暂时没有预编译安装包」的如实说明 |
+| `help.html` | 首次使用 / 连接 Agent 三态 / PPT 可选组件 / 数据恢复 |
+| `privacy.html` | 数据边界逐条（不联网、无遥测、批注在本地） |
+| `changelog.html` | 只列真实发布过的版本 |
+| `404.html` / `robots.txt` / `sitemap.xml` | 基础工程项 |
+
+验收（`node tools/verify-site.mjs`，先 `cd site && python3 -m http.server 4680`）：**PASS 29 / FAIL 0 / SKIP 0**
+
+- 1440 / 768 / 390 三档宽度**均无横向溢出**（390px 那 151px 溢出是真 bug：`.steps` 的 grid/flex 子项默认 `min-width:auto`，
+  被 `<pre>` 里的长 URL 顶宽——已修）。
+- 图片全部加载、外链均为真实 https、**无空链接**。
+- **不含**虚构用户数 / 客户 / 推荐语；明确写出「暂无预编译安装包」与「PPT 需可选组件」。
+- 演示页真交互：选中→三个动作→写批注→原文出现绿色虚线（`rgb(57,128,90)`）→右栏卡片→「已处理」变灰→重置归零。
+
+**尚未公网发布。** 可选两种方式（都需要所有者决定）：GitHub Pages，或用 WorkBuddy 的「发布为应用」生成分享链接。
+官网里的主按钮现在指向 GitHub 仓库——**在 Release 真正发出去之前不会指向下载链接**。
+
 ## 8. 还没做的（按你给的顺序）
 
 - 第 6 步「做一个简单官网」：未开始。建议等 Release 真的发出去、README 首屏验收过再做，避免官网先于能力上线。

@@ -18,7 +18,8 @@ const spans = await page.eval(`return [...document.querySelectorAll('#doc .pdf-p
   .filter(s => s.w > 40 && s.h > 5).slice(0, 12);`);
 // 挑一个粗体小标题来批注：缩略图尺寸下虚线也看得见
 const head = await page.eval(`const one = [...document.querySelectorAll("#doc .pdf-page .textLayer span")]
-  .find(s => /Variables|Identification/.test(s.textContent || ""));
+  .filter(s => (s.textContent || "").trim().length > 30)
+  .sort((x, y) => y.getBoundingClientRect().width - x.getBoundingClientRect().width)[0];
   if (!one) return null; const r = one.getBoundingClientRect();
   return { x: r.x, y: r.y, w: r.width, h: r.height };`);
 const a = head || spans[3] || spans[0];
@@ -35,9 +36,19 @@ if (btn) {
   await sleep(1400);
 }
 
+// 等「批注已保存」提示条自己消失：首屏图里挂着一个黑药丸很难看
+for (let i = 0; i < 30; i += 1) {
+  const showing = await page.eval(`return [...document.querySelectorAll('body *')].some((el) =>
+    el.children.length === 0 && /批注已保存/.test(el.textContent || '')
+    && el.getBoundingClientRect().height > 0
+    && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).opacity !== '0');`);
+  if (!showing) break;
+  await sleep(400);
+}
+
 // 让正文与批注卡同屏：滚到批注所在位置
 await page.eval(`const m = document.querySelector('#doc .pdf-text .anchor'); if (m) m.scrollIntoView({ block: 'center' }); return 1;`);
-await sleep(900);
+await sleep(1000);
 await page.shot(`${OUTDIR}/coeditor-reading.png`);
 console.log("写出:", `${OUTDIR}/coeditor-reading.png`);
 

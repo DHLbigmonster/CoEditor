@@ -1,0 +1,242 @@
+/* CoEditor 官网样式：与产品同一套颜色变量，静态优先、无构建、无第三方 */
+
+:root {
+  --bg: #f7f7f3;
+  --paper: #ffffff;
+  --ink: #252923;
+  --ink-dim: #62675f;
+  --ink-faint: #8b8f87;
+  --line: #e6e8e1;
+  --brand: #42664d;
+  --brand-soft: #eef2ec;
+  --green: #39805a;
+  --amber: #a8701a;
+  --warm: rgba(228, 190, 74, .16);
+  --radius: 10px;
+  --maxw: 1140px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+img { max-width: 100%; height: auto; display: block; }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+/* ---------------- 顶栏 ---------------- */
+.nav {
+  position: sticky; top: 0; z-index: 20; height: 64px;
+  display: flex; align-items: center;
+  background: rgba(247, 247, 243, .88);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.nav .wrap { display: flex; align-items: center; gap: 28px; width: 100%; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; letter-spacing: .01em; color: var(--ink); }
+.brand img { width: 22px; height: 22px; }
+.nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; }
+.nav-links a { color: var(--ink-dim); }
+.nav-links a:hover { color: var(--ink); text-decoration: none; }
+.nav-cta {
+  padding: 7px 15px; border-radius: 8px; font-size: 14px;
+  background: var(--brand); color: #fff !important;
+}
+.nav-cta:hover { background: #37543f; text-decoration: none; }
+
+/* ---------------- 按钮 ---------------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 20px; border-radius: 8px; border: 1px solid transparent;
+  font-size: 15px; font-weight: 500; cursor: pointer; font-family: inherit;
+}
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-primary:hover { background: #37543f; text-decoration: none; }
+.btn-ghost { background: var(--paper); border-color: var(--line); color: var(--ink); }
+.btn-ghost:hover { border-color: #cfd2c8; text-decoration: none; }
+
+/* ---------------- 首屏 ---------------- */
+.hero { padding: 76px 0 24px; text-align: center; }
+.hero h1 { font-size: 46px; line-height: 1.25; margin: 0 0 18px; letter-spacing: -.01em; }
+.hero p.lead { font-size: 18px; color: var(--ink-dim); max-width: 640px; margin: 0 auto 30px; }
+.hero .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero .sub { margin-top: 16px; font-size: 13px; color: var(--ink-faint); }
+.hero-shot { margin: 46px auto 0; max-width: 1000px; }
+.hero-shot img {
+  border-radius: 12px; border: 1px solid var(--line);
+  box-shadow: 0 18px 50px rgba(35, 30, 20, .10);
+}
+
+/* ---------------- 区块 ---------------- */
+section { padding: 72px 0; }
+section + section { border-top: 1px solid var(--line); }
+h2 { font-size: 30px; margin: 0 0 12px; letter-spacing: -.01em; }
+.sec-lead { color: var(--ink-dim); max-width: 680px; margin: 0 0 34px; }
+
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 22px 22px 20px;
+}
+.card h3 { margin: 0 0 8px; font-size: 17px; }
+.card p { margin: 0; color: var(--ink-dim); font-size: 14.5px; }
+
+/* 标记演示（和产品里的三种标记一致） */
+.mark-demo { font-size: 15px; line-height: 2.1; color: var(--ink); }
+.m-comment { text-decoration: underline dashed var(--green) 1.5px; text-underline-offset: 4px; }
+.m-done { text-decoration: underline dashed var(--ink-faint) 1.5px; text-underline-offset: 4px; }
+.m-retain { background: var(--warm); border-radius: 2px; }
+.m-strike { text-decoration: line-through; text-decoration-color: #c0392b; text-decoration-thickness: 1.5px; }
+
+/* 格式表 */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--ink-dim); font-size: 13px; letter-spacing: .02em; }
+td.yes { color: var(--green); white-space: nowrap; }
+td.no { color: var(--ink-faint); white-space: nowrap; }
+
+/* 步骤 */
+/* grid/flex 子项默认 min-width:auto：不显式归零，一个长 URL 就能把整页顶出横向滚动条 */
+.steps { counter-reset: step; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.step { display: flex; gap: 16px; align-items: flex-start; min-width: 0; }
+/* 关键：flex 子项默认 min-width:auto，会被 <pre> 里的长 URL 顶宽，进而把整页撑出横向滚动 */
+.step > div { min-width: 0; flex: 1 1 auto; }
+.step pre { max-width: 100%; }
+.step::before {
+  counter-increment: step; content: counter(step);
+  flex: none; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand);
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+}
+.step code, code.inline {
+  background: #f1f0ea; border: 1px solid var(--line); border-radius: 5px;
+  padding: 1px 6px; font-size: 13.5px;
+}
+pre {
+  background: #f1f0ea; border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; overflow-x: auto; font-size: 13.5px; line-height: 1.7; margin: 0 0 10px;
+}
+
+/* FAQ */
+details.faq {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 18px; margin-bottom: 10px;
+}
+details.faq summary { cursor: pointer; font-weight: 500; }
+details.faq summary::marker { color: var(--ink-faint); }
+details.faq p { margin: 10px 0 0; color: var(--ink-dim); font-size: 14.5px; }
+
+.note {
+  background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--amber);
+  border-radius: 6px; padding: 12px 16px; font-size: 14px; color: var(--ink-dim);
+}
+.note b { color: var(--ink); }
+
+/* ---------------- 页脚 ---------------- */
+footer {
+  border-top: 1px solid var(--line); padding: 34px 0 46px;
+  font-size: 13.5px; color: var(--ink-faint);
+}
+footer .cols { display: flex; gap: 40px; flex-wrap: wrap; margin-bottom: 18px; }
+footer h4 { font-size: 13px; color: var(--ink-dim); margin: 0 0 8px; font-weight: 600; }
+footer ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+footer a { color: var(--ink-dim); }
+
+/* ---------------- 演示页 ---------------- */
+.demo-shell {
+  display: grid; grid-template-columns: 1fr 320px; gap: 20px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; min-height: 420px;
+}
+.demo-doc { padding: 30px 34px; font-size: 15.5px; line-height: 1.95; }
+.demo-doc h3 { margin: 0 0 4px; font-size: 19px; }
+.demo-doc .meta { color: var(--ink-faint); font-size: 12.5px; margin-bottom: 22px; }
+.demo-doc p { margin: 0 0 16px; }
+.demo-rail { border-left: 1px solid var(--line); background: #fbfbf8; padding: 18px; overflow-y: auto; max-height: 560px; }
+.demo-rail h4 { margin: 0 0 12px; font-size: 13px; color: var(--ink-dim); }
+.demo-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 10px; font-size: 13px; line-height: 1.6;
+}
+.demo-card .q { color: var(--ink-faint); margin-top: 6px; font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.demo-card .row { display: flex; gap: 8px; margin-top: 8px; }
+.demo-card button {
+  border: 1px solid var(--line); background: var(--paper); border-radius: 6px;
+  padding: 3px 9px; font-size: 12px; cursor: pointer; font-family: inherit; color: var(--ink-dim);
+}
+.demo-card button:hover { border-color: #cfd2c8; color: var(--ink); }
+.demo-card.done .body { color: var(--ink-faint); }
+.demo-empty { color: var(--ink-faint); font-size: 13px; }
+.mark-dashed { text-decoration: underline dashed var(--green) 1.5px; text-underline-offset: 4px; cursor: pointer; }
+.mark-dashed.is-done { text-decoration-color: var(--ink-faint); }
+.mark-retain { background: var(--warm); border-radius: 2px; }
+.mark-strike { text-decoration: line-through; text-decoration-color: #c0392b; text-decoration-thickness: 1.5px; }
+
+.sel-menu {
+  position: absolute; z-index: 30; display: flex; gap: 2px;
+  background: #252923; border-radius: 8px; padding: 4px; box-shadow: 0 10px 26px rgba(20,18,14,.22);
+}
+.sel-menu button {
+  border: 0; background: transparent; color: #f2f2ee; font: inherit; font-size: 13px;
+  padding: 5px 11px; border-radius: 6px; cursor: pointer;
+}
+.sel-menu button:hover { background: rgba(255,255,255,.14); }
+
+.composer {
+  position: absolute; z-index: 31; width: 320px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(25,22,16,.16); padding: 12px;
+}
+.composer textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px;
+  font: inherit; font-size: 14px; resize: vertical; min-height: 68px;
+}
+.composer .row { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.composer .row .hint { font-size: 12px; color: var(--ink-faint); margin-right: auto; }
+
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.toolbar .grow { margin-left: auto; }
+.pill {
+  font-size: 12.5px; color: var(--ink-dim); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px;
+}
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 900px) {
+  .hero h1 { font-size: 34px; }
+  .grid3 { grid-template-columns: 1fr; }
+  .demo-shell { grid-template-columns: 1fr; }
+  .demo-rail { border-left: 0; border-top: 1px solid var(--line); max-height: none; }
+  section { padding: 54px 0; }
+}
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  .nav-links { display: none; }
+  .hero { padding: 48px 0 16px; }
+  .hero h1 { font-size: 27px; }
+  .hero p.lead { font-size: 16px; }
+  .hero .actions .btn { width: 100%; justify-content: center; }
+  h2 { font-size: 23px; }
+  .wrap { padding: 0 18px; }
+  .demo-doc { padding: 22px 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
