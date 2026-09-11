@@ -1,4 +1,5 @@
 import http from "node:http";
+import { inspectOffice, patchOffice } from './lib/office-text.mjs';
 import { readFileSync } from "node:fs";
 import { readFile, writeFile, mkdir, stat, readdir, rename, realpath } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
@@ -250,6 +251,23 @@ const requestHandler = async (req, res) => {
       releaseQueue = await queueRequest();
       // versions 的登记/验收/继承都改 sidecar，必须与批注写入同一把锁（否则可与 MCP 并发互踩）
       if (/^\/api\/(annotations|constraints|rounds|canvas|supersede|sync|review|resolve|versions)(?:\/|$)/.test(url.pathname)) releaseStore = await acquireStoreLock(SIDECAR);
+    }
+    if (url.pathname === '/api/office-text') {
+      const rel = url.searchParams.get('p');
+      const target = await safeResolveReal(rel);
+      if (!target || !/\.(docx|pptx)$/i.test(target)) return send(400, JSON.stringify({error:'仅支持 DOCX / PPTX'}));
+      const buffer = await readFile(target);
+      if (req.method === 'GET') {
+        const {revision, segments} = await inspectOffice(buffer);
+        return send(200, JSON.stringify({revision, segments}));
+      }
+      if (req.method !== 'POST') return send(405, '{}');
+      const body = await readJson(req);
+      const output = await patchOffice(buffer, body.revision, body.edits);
+      const ext = extname(target);
+      const destination = target.slice(0, -ext.length) + '-文字修改-' + Date.now() + ext;
+      await writeFile(destination, output, {flag:'wx'});
+      return send(200, JSON.stringify({path:relative(ROOT, destination)}));
     }
     if (url.pathname === '/api/sync') {
       const data = await readSidecar(); const target = safeResolve(url.searchParams.get('p'));
@@ -913,6 +931,12 @@ const requestHandler = async (req, res) => {
               }
             : null,
           image: typeof body.image === "string" && body.image ? body.image : null,
+          // 精确定位（B01）：页号 + 页内原始偏移 + 该页文本指纹。
+          // 指纹一致 = 内容没变，可零猜测按偏移落点；变了由前端退回规范化搜索，绝不盲用旧坐标。
+          pageIndex: Number.isFinite(body.pageIndex) ? body.pageIndex : null,
+          textOffset: Number.isFinite(body.textOffset) ? body.textOffset : null,
+          textLen: Number.isFinite(body.textLen) ? body.textLen : null,
+          pageFp: typeof body.pageFp === "string" && body.pageFp ? body.pageFp : null,
           created: new Date().toISOString(),
           status: "active",
           weight: 1,
@@ -931,8 +955,13 @@ const requestHandler = async (req, res) => {
         if (!item) return send(404, JSON.stringify({ error: "not found" }));
         if (body.version !== undefined && body.version !== annotationVersion(item)) return send(409, JSON.stringify({ error: 'annotation-changed-externally' }));
         if (['body', 'status', 'quote', 'kind', 'region', 'image'].some(key => body[key] !== undefined && JSON.stringify(body[key]) !== JSON.stringify(item[key]))) item.version = annotationVersion(item) + 1;
-        for (const field of ["body", "status", "weight", "x", "y", "quote", "kind", "region", "image", "anchorStatus"]) {
+        for (const field of ["body", "status", "weight", "x", "y", "quote", "kind", "region", "image", "anchorStatus",
+          "pageIndex", "textOffset", "textLen", "pageFp"]) {
           if (body[field] !== undefined) item[field] = body[field];
+        }
+        // 原文换了 → 旧的精确偏移必须作废，否则会把批注钉到新文本的同一偏移上（错位）
+        if (body.quote !== undefined && body.quote !== item.quote) {
+          item.textOffset = null; item.textLen = null; item.pageFp = null;
         }
         item.history = item.history || [];
         item.history.push({ event: body.event || "updated", at: new Date().toISOString() });

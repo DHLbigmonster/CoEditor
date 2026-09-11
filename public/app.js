@@ -141,8 +141,8 @@ function feedbackTabs() {
  let html = '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">';
  html += main.map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + groupCount(key) + '</b></button>').join('');
  const histCount = groupCount('history');
- html += '<button role="tab" aria-selected="' + (feedbackFilter === 'history') + '" data-feedback="history">已修改历史' + (histCount ? ' <b>' + histCount + '</b>' : '') + '</button>';
  html += '<details class="tabs-more"><summary title="保留要求与版本对照">⋯</summary><div>'
+      + '<button data-feedback="history">更早的意见 <b>' + histCount + '</b></button>'
       + '<button data-feedback="retained">保留 <b>' + groupCount('retained') + '</b></button>'
       + '<button data-feedback="versions">版本对照 <b>' + versionState.list.length + '</b></button>'
       + '</div></details>';
@@ -175,19 +175,60 @@ function clampView() {
 
 let pdfZoomTimer = null;
 let pdfZoomApplied = 1;
+let pdfZoomAnchor = null; // 光标下的文档锚点：新尺寸渲染完再恢复，避免「按旧尺寸夹紧」造成的漂移
+let pdfZoomGen = 0; // 渲染代次：旧任务不得覆盖新尺寸/新锚点
+
+/** 记住光标位置对应的「页码 + 页内归一化点 + 屏幕偏移」，供重渲染后还原 */
+function captureZoomAnchor(clientX, clientY) {
+  const viewport = $("viewport");
+  const vr = viewport.getBoundingClientRect();
+  const under = document.elementFromPoint(clientX, clientY);
+  const page = under && under.closest ? under.closest(".pdf-page") : null;
+  if (!page) return null;
+  const pr = page.getBoundingClientRect();
+  if (!pr.width || !pr.height) return null;
+  return {
+    page: Number(page.dataset.page),
+    fx: (clientX - pr.left) / pr.width,
+    fy: (clientY - pr.top) / pr.height,
+    dx: clientX - vr.left,
+    dy: clientY - vr.top,
+  };
+}
+
+/** 把锚点恢复到同一屏幕位置（渲染完成后调用，只动滚动，不动倍率） */
+function restoreZoomAnchor(anchor) {
+  if (!anchor) return;
+  const viewport = $("viewport");
+  const page = $("doc").querySelector(`.pdf-page[data-page="${anchor.page}"]`);
+  if (!page) return;
+  const vr = viewport.getBoundingClientRect();
+  const pr = page.getBoundingClientRect();
+  if (!pr.width || !pr.height) return;
+  const pointX = pr.left + anchor.fx * pr.width;
+  const pointY = pr.top + anchor.fy * pr.height;
+  viewport.scrollLeft += pointX - (vr.left + anchor.dx);
+  viewport.scrollTop += pointY - (vr.top + anchor.dy);
+}
+
 function schedulePdfZoom() {
   // PDF 是固定像素内容：缩放要真正改变画布尺寸并产生内部滚动（像浏览器 PDF 查看器），
   // 而不是被 flex 压回容器宽。防抖重渲染，复用已打开的文档句柄。
   if (state.mode !== "pdf" || state.workspaceMode !== "read") return;
   clearTimeout(pdfZoomTimer);
+  const gen = ++pdfZoomGen;
   pdfZoomTimer = setTimeout(async () => {
     if (typeof window.setPdfZoom !== "function") return;
     try {
       await window.setPdfZoom($("doc"), view.zoom);
+      if (gen !== pdfZoomGen) return; // 期间又缩放过：旧任务直接作废，不覆盖新状态
       pdfZoomApplied = view.zoom;
       await anchorAll();
+      if (gen !== pdfZoomGen) return;
       renderRegions();
       drawLines();
+      restoreZoomAnchor(pdfZoomAnchor);
+      pdfZoomAnchor = null;
     } catch { /* 渲染失败保持现状，下次缩放再试 */ }
   }, 320);
 }
@@ -259,10 +300,20 @@ function zoomAt(factor, clientX, clientY) {
     const viewport = $("viewport");
     const old = view.zoom;
     // 与浏览器/PDF 阅读器一致：放大只作用于文档内容，范围放开到 50%–300%
-    view.zoom = Math.min(3, Math.max(0.5, view.zoom * factor));
-    const ratio = view.zoom / old;
-    viewport.scrollLeft = (viewport.scrollLeft + clientX - viewport.getBoundingClientRect().left) * ratio - (clientX - viewport.getBoundingClientRect().left);
-    viewport.scrollTop = (viewport.scrollTop + clientY - viewport.getBoundingClientRect().top) * ratio - (clientY - viewport.getBoundingClientRect().top);
+    const next = Math.min(3, Math.max(0.5, old * factor));
+    if (next === old) return;
+    view.zoom = next;
+    if (state.mode === "pdf" && state.workspaceMode === "read") {
+      // PDF 的尺寸变化是**异步**的（防抖后重建页面）。此刻按旧尺寸改 scrollTop 会被夹紧，
+      // 等新尺寸渲染完再恢复又早已偏了——所以这里只记锚点，滚动交给 restoreZoomAnchor。
+      pdfZoomAnchor = captureZoomAnchor(clientX, clientY) || pdfZoomAnchor;
+      applyTransform();
+      return;
+    }
+    const ratio = next / old;
+    const vr = viewport.getBoundingClientRect();
+    viewport.scrollLeft = (viewport.scrollLeft + clientX - vr.left) * ratio - (clientX - vr.left);
+    viewport.scrollTop = (viewport.scrollTop + clientY - vr.top) * ratio - (clientY - vr.top);
     applyTransform();
     return;
   }
@@ -487,44 +538,93 @@ function renderMarkdown(source) {
   return out.join("\n");
 }
 
-/* ---------------- 锚点 ---------------- */
+/* ---------------- 锚点 ----------------
+ * B01 根因（2026-09-11 实测）：保存的 quote 源自 Selection.toString()，跨行时带 "\n"；
+ * 而 PDF 文字层的文本节点拼接出来**没有分隔符**（"…附录 AWorking draft…"）。
+ * 两者直接 indexOf 必然 -1 → locate 返回 null → 一个 mark 都不画 → "原文看不到批注"。
+ * 所以这里严格分两套字符串：
+ *   text —— 原文，只用于取字形/偏移，不参与匹配
+ *   norm —— 匹配用规范文本（去空白 + NFKC），normToRaw 保存回原偏移的映射
+ * 匹配在 norm 空间做，落点映射回 raw 空间，wrapRange 才能拿到真实的 DOM 位置。
+ */
+function normChar(ch) {
+  if (/\s/.test(ch)) return ""; // 换行/全角空格/不换行空格一律不可见于匹配
+  const k = ch.normalize("NFKC"); // 全角→半角、连字 ﬁ→fi（多字符时映射会重复指向同一 raw 位置）
+  return k === ch ? ch : k;
+}
+
+function normalizeForMatch(value) {
+  let out = "";
+  for (const ch of String(value || "")) out += normChar(ch);
+  return out;
+}
+
+/** 页/文档内容指纹：内容没变才能用精确偏移，变了必须重新定位 */
+function textFingerprint(value) {
+  const s = String(value || "");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `${s.length}:${(h >>> 0).toString(36)}`;
+}
+
 function buildIndex(root) {
   const owner = root.ownerDocument || document;
   const walker = owner.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const map = [];
+  const raw = []; // raw 下标 → { node, offset }
+  const normToRaw = []; // norm 下标 → raw 下标
   let text = "";
+  let norm = "";
   let node;
   while ((node = walker.nextNode())) {
     const value = node.nodeValue;
     for (let i = 0; i < value.length; i += 1) {
-      text += value[i];
-      map.push({ node, offset: i });
+      const rawIndex = text.length;
+      const ch = value[i];
+      text += ch;
+      raw.push({ node, offset: i });
+      const k = normChar(ch);
+      for (let j = 0; j < k.length; j += 1) { norm += k[j]; normToRaw.push(rawIndex); }
     }
   }
-  return { text, map };
+  return { text, norm, raw, normToRaw };
 }
 
 function locate(index, annotation) {
-  const candidates = [annotation.quote];
-  if (annotation.quote && annotation.quote.length > 24) candidates.push(annotation.quote.slice(0, 24));
-  if (annotation.prefix) candidates.push((annotation.prefix + annotation.quote).slice(-annotation.quote.length));
+  // 1) 内容未变 → 用保存的精确偏移，不做任何猜测
+  const fp = textFingerprint(index.text);
+  if (Number.isFinite(annotation.textOffset) && annotation.pageFp && annotation.pageFp === fp) {
+    const start = annotation.textOffset;
+    const end = Number.isFinite(annotation.textLen) ? start + annotation.textLen : start + normalizeForMatch(annotation.quote).length;
+    if (start >= 0 && end <= index.raw.length && end > start) return { start, end, exact: true, drifted: false };
+  }
+  // 2) 否则按规范化文本搜索（跨行/空白/全角/连字差异都在这里被吸收）
+  const quote = normalizeForMatch(annotation.quote);
+  if (!quote) return null;
+  const candidates = [quote];
+  if (quote.length > 24) candidates.push(quote.slice(0, 24));
   for (const candidate of candidates) {
-    if (!candidate) continue;
     const hits = [];
-    let at = index.text.indexOf(candidate);
-    while (at >= 0) { hits.push(at); at = index.text.indexOf(candidate, at + 1); }
+    let at = index.norm.indexOf(candidate);
+    while (at >= 0) { hits.push(at); at = index.norm.indexOf(candidate, at + 1); }
     if (!hits.length) continue;
     // 多处命中时用 prefix/suffix 上下文消歧，避免重复句钉到第一处
+    const prefix = normalizeForMatch(annotation.prefix);
+    const suffix = normalizeForMatch(annotation.suffix);
     let best = hits[0];
     let bestScore = -1;
     for (const start of hits) {
       let score = 0;
-      if (annotation.prefix && index.text.slice(Math.max(0, start - annotation.prefix.length), start) === annotation.prefix) score += 2;
-      if (annotation.suffix && index.text.slice(start + candidate.length, start + candidate.length + annotation.suffix.length) === annotation.suffix) score += 2;
+      if (prefix && index.norm.slice(Math.max(0, start - prefix.length), start) === prefix) score += 2;
+      if (suffix && index.norm.slice(start + candidate.length, start + candidate.length + suffix.length) === suffix) score += 2;
       if (score > bestScore) { bestScore = score; best = start; }
       if (score === 4) break;
     }
-    return { start: best, end: best + candidate.length, drifted: candidate !== annotation.quote };
+    const normEnd = best + candidate.length;
+    return {
+      start: index.normToRaw[best],
+      end: (index.normToRaw[normEnd - 1] ?? index.raw.length - 1) + 1,
+      drifted: candidate !== quote,
+    };
   }
   return null;
 }
@@ -558,9 +658,14 @@ function wrapRange(map, start, end, id) {
 async function anchorAll() {
   let decayed = 0;
   const root = annotationRoot();
+  // PDF 按页建索引：批注只可能在它自己那一页里，跨页搜索既慢又容易钉到别的页的同名句
+  const pages = new Map([...root.querySelectorAll(".pdf-page")].map((el) => [Number(el.dataset.page), el]));
   for (const annotation of state.annotations) {
     if (annotation.region) continue; // 区域批注不参与文本锚定
-    const index = buildIndex(root); // 每条重建：wrapRange 会改变 DOM 文本节点
+    const scope = Number.isFinite(annotation.pageIndex) && pages.has(annotation.pageIndex)
+      ? pages.get(annotation.pageIndex)
+      : root;
+    const index = buildIndex(scope); // 每条重建：wrapRange 会改变 DOM 文本节点
     const hit = locate(index, annotation);
     annotation.__lost = !hit;
     annotation.__drifted = Boolean(hit && hit.drifted);
@@ -574,12 +679,15 @@ async function anchorAll() {
       continue;
     }
     if (annotation.anchorStatus === 'missing') { annotation.anchorStatus = 'located'; await patch(annotation.id, { anchorStatus: 'located', event: 'anchor_relocated' }); }
-    wrapRange(index.map, hit.start, hit.end, annotation.id);
+    wrapRange(index.raw, hit.start, hit.end, annotation.id);
   }
   root.querySelectorAll(".anchor").forEach((node) => {
     const item = state.annotations.find((entry) => entry.id === node.dataset.ann);
     node.dataset.status = item ? item.status : "active";
     node.dataset.kind = item && (item.kind === "highlight" || item.kind === "strike") ? item.kind : "comment";
+    if (node.closest(".pdf-text") && node.dataset.kind === "comment") {
+      node.title = `${item?.status === "addressed" ? "已修改" : "待修改"} · ${item?.body || "点击查看批注"}`;
+    }
   });
   // 补充决策：保留 = 页边低对比小标记（md/text 文档；正文只留极淡底）。
   // 每个保留范围一个标记（跨行不重复堆图标——按 annId 去重），可键盘聚焦，点击弹浮卡
@@ -673,17 +781,23 @@ function cardElement(annotation) {
   card.addEventListener("mouseenter", () => { state.hovered = annotation.id; drawLines(); applyPeek(annotation.id); });
   card.addEventListener("mouseleave", () => { state.hovered = null; drawLines(); clearPeek(); });
 
+  /* B02：选中与定位一律放到 click 阶段，且先排除「拖选文字」和「点引用」两种意图。
+     旧实现把 selectCard 挂在 mousedown，而 selectCard 在切换分组时会重建整个列表——
+     于是 pointerdown 到 click 之间被点的那张卡已经被换掉，点击结果取决于运气。
+     另外拖选卡片文字后浏览器仍会补发一个 click，旧代码会据此把正文滚走。 */
+  let cardPointerStart = null;
   card.addEventListener("mousedown", (event) => {
-    if (event.target.closest("button, textarea")) return;
+    if (event.target.closest("button, textarea, summary, details, a")) return;
     event.stopPropagation();
-    selectCard(annotation.id);
-    if (!isCanvasMode()) return;
+    cardPointerStart = { x: event.clientX, y: event.clientY, moved: false };
+    if (!isCanvasMode()) return; // 阅读态卡片不可拖拽（规格 §3.6）
     const startX = event.clientX;
     const startY = event.clientY;
     const originX = parseFloat(card.style.left);
     const originY = parseFloat(card.style.top);
     card.classList.add("dragging");
     const move = (moveEvent) => {
+      if (cardPointerStart) cardPointerStart.moved = true;
       card.style.left = `${originX + (moveEvent.clientX - startX) / view.zoom}px`;
       card.style.top = `${originY + (moveEvent.clientY - startY) / view.zoom}px`;
       // 同步内存坐标：drawLines 读的是 annotation.x/y——不同步的话引导线在拖动全程钉在旧位置
@@ -704,7 +818,15 @@ function cardElement(annotation) {
   });
 
   card.addEventListener("click", (event) => {
-    if (event.target.tagName === "BUTTON") return;
+    // 按钮/输入/折叠/引用各有自己的职责：点它们不做「选中 + 定位」
+    if (event.target.closest("button, textarea, summary, details, a, .c-quote")) return;
+    const start = cardPointerStart;
+    cardPointerStart = null;
+    if (start && (start.moved || Math.abs(event.clientX - start.x) > 4 || Math.abs(event.clientY - start.y) > 4)) return; // 拖过：不是点击
+    const selection = window.getSelection();
+    if (selection && String(selection).trim() && card.contains(selection.anchorNode)) return; // 正在复制卡内文字：不跳正文
+    // 选中放在 click 阶段，且不重建列表：卡片已经在眼前，重建只会吃掉这次点击
+    selectCard(annotation.id, { rebuildIfHidden: false });
     const mark = findAnchor(annotation.id);
     if (!mark) return toast("这条批注的原文已找不到，已自动标记过期");
     mark.classList.remove("flash");
@@ -849,10 +971,16 @@ document.addEventListener("mousedown", (event) => {
 }, true);
 window.addEventListener("keydown", (event) => { if (event.key === "Escape") closeAnchorCard(); });
 
-function selectCard(id) {
+/* B02：rebuildIfHidden=false 用于「用户直接点右栏里的卡」——卡已经在眼前，没有理由重建。
+   重建会让 pointerdown 到 click 之间被点的那张卡被换掉，点击结果变成随机（实测 20 次里错 6 次）。
+   只有从正文侧选中一条不在当前分组里的批注时，才需要切分组重画。 */
+function selectCard(id, { rebuildIfHidden = true } = {}) {
   state.selected = id;
   const selected = state.annotations.find(a => a.id === id);
-  if (selected && feedbackGroup(selected) !== feedbackFilter) { feedbackFilter = feedbackGroup(selected); renderCards(); }
+  if (rebuildIfHidden && selected && feedbackGroup(selected) !== feedbackFilter) {
+    feedbackFilter = feedbackGroup(selected);
+    renderCards();
+  }
   document.querySelectorAll(".card").forEach((node) => node.classList.toggle("selected", node.dataset.id === id));
   drawLines();
   reportUiState();
@@ -2251,8 +2379,44 @@ function renderPptxShell(host) {
     </div>`;
 }
 
-async function renderPptx(host) {
+function showOfficeSetup(onEnable) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'office-editor office-setup';
+  dialog.setAttribute('aria-label', 'PPT 原版预览设置');
+  dialog.innerHTML = `<p class="journal-eyebrow">可选扩展 · 在本机运行</p><h2>让 PPT 显示原来的样子</h2>
+    <p>文字查看和小范围改字不需要额外下载。原版幻灯片预览需要单独安装 <strong>LibreOffice</strong>，不会打包进 CoEditor。</p>
+    <p class="office-notice">本机安装实测约 804 MB，其他版本会不同；首次转换可能较慢。转换结果可能受字体、动画和复杂排版影响，不保证与 PowerPoint 完全一致。</p>
+    <ol><li>从 LibreOffice 官网下载并安装，再尝试打开一次。</li><li>若 macOS 提示“无法验证开发者”，先核对下载来源；确认可信后，可查看「系统设置 → 隐私与安全」中的对应提示，自行决定是否“仍要打开”。不同版本的提示次数不固定。</li><li><strong>如果提示包含恶意软件、会损坏电脑或文件已损坏，不要反复允许；停止打开，核对来源并重新下载。</strong></li></ol>
+    <p class="office-notice">CoEditor 不会替你绕过安全检查、关闭 Gatekeeper 或清除隔离标记。</p>
+    <p><a href="https://www.libreoffice.org/download/download-libreoffice/" target="_blank" rel="noopener noreferrer">官方下载 ↗</a> · <a href="https://support.apple.com/102445" target="_blank" rel="noopener noreferrer">Apple 安全说明 ↗</a></p>
+    <footer><button class="chip" data-disable>仅用文字模式</button><button class="chip" data-cancel>关闭</button><button class="chip" data-enable>已安装，启用预览</button></footer>`;
+  dialog.querySelector('[data-disable]').onclick = () => {
+    try { localStorage.removeItem('coeditor-office-preview-optin'); } catch {}
+    dialog.close();
+    if (state.mode === 'pptx') renderPptxNoEngine(document.getElementById('doc'), {});
+  };
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.querySelector('[data-enable]').onclick = () => {
+    try { localStorage.setItem('coeditor-office-preview-optin', '1'); } catch {}
+    dialog.close(); onEnable?.();
+  };
+  dialog.addEventListener('close', () => dialog.remove(), {once:true});
+  document.body.append(dialog); dialog.showModal();
+}
+
+async function renderPptx(host, enabled = false) {
   host.classList.add("pptx-view-host");
+  let optedIn = enabled;
+  try { optedIn ||= localStorage.getItem('coeditor-office-preview-optin') === '1'; } catch {}
+  if (!optedIn) {
+    host.innerHTML = '<div class="office-welcome"><p class="journal-eyebrow">演示文稿</p><h2>先读内容，或查看完整幻灯片</h2><p>文字阅读与修改无需额外软件。需要原版排版时，再启用本地转换扩展。</p><div class="office-choices"><button class="chip" data-text>直接看文字</button><button class="chip" data-preview>设置幻灯片预览</button></div></div>';
+    host.querySelector('[data-text]').onclick = () => renderPptxNoEngine(host, {});
+    host.querySelector('[data-preview]').onclick = () => {
+      const path = state.path;
+      showOfficeSetup(() => { if (path === state.path) renderPptx(host, true); });
+    };
+    return;
+  }
   const epoch = docEpoch;
   host.innerHTML = '<div class="pptx-status">正在读取这份 PPT…</div>';
   pptxState.fontsChecked = null;
@@ -2282,7 +2446,27 @@ async function renderPptx(host) {
   await paintPptxSlide(epoch);
 }
 
-function renderPptxNoEngine(host, info) {
+async function renderPptxNoEngine(host, info) {
+  const epoch = docEpoch;
+  try {
+    const response = await fetch(`/api/office-text?p=${encodeURIComponent(state.path)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取失败');
+    if (epoch !== docEpoch) return;
+    host.innerHTML = '<div class="office-text-preview"><h2>PPT 文字内容</h2><p class="office-notice">这是文字提取视图，不包含原版排版、图表和图片。可点顶栏「修改文字」另存修改版。原版逐页预览需要可选的 LibreOffice，本工具不会自动安装。</p></div>';
+    const root = host.firstElementChild;
+    for (const part of [...new Set(data.segments.map(s => s.part))]) {
+      const section = document.createElement('section');
+      const heading = document.createElement('h3');
+      heading.textContent = `幻灯片内容 · ${part.split('/').pop()}`;
+      section.append(heading);
+      for (const segment of data.segments.filter(s => s.part === part && s.text.trim())) {
+        const p = document.createElement('p'); p.textContent = segment.text; section.append(p);
+      }
+      root.append(section);
+    }
+    return;
+  } catch (error) { if (epoch !== docEpoch) return; }
   const mb = info.downloadBytes ? `（约 ${Math.round(info.downloadBytes / 1048576)} MB）` : "";
   const pages = (info.slides || []).length;
   host.innerHTML = `
@@ -2347,7 +2531,7 @@ async function paintPptxSlide(epoch) {
     head.innerHTML = `
       <span class="pptx-count">共 ${pptxState.slides.length} 页 · 第 ${pptxState.page} 页</span>
       ${missing.length ? '<span class="pptx-flag">缺字体：' + escapeHtml(missing.join("、")) + '（预览可能失真）</span>' : ""}
-      ${(info.warnings || []).length ? '<span class="pptx-flag">转换有告警，见「详情」</span>' : ""}
+      ${(info.warnings || []).length ? '<details class="pptx-warning"><summary>转换提示</summary><p>' + info.warnings.map(escapeHtml).join('<br>') + '</p></details>' : ""}
       ${pptxFontBanner({ ...info, fontsUsed: info.fontsUsed })}
       <button class="pptx-link" id="pptx-rebuild" title="文件被 Agent 改过后重建预览">重建预览</button>`;
     head.querySelector("#pptx-rebuild")?.addEventListener("click", async () => {
@@ -2388,7 +2572,8 @@ async function paintPptxSlide(epoch) {
 
   // 当前幻灯片
   if (!window.renderPdfPage) { stage.innerHTML = '<p class="pptx-note">渲染器尚未加载，请稍候再打开。</p>'; return; }
-  const size = await window.renderPdfPage(pptxState.url, pptxState.page, stage, { width: 900 });
+  const availableWidth = Math.max(180, Math.min(1100, $("pptx-stage").clientWidth));
+  const size = await window.renderPdfPage(pptxState.url, pptxState.page, stage, { width: availableWidth });
   if (epoch !== docEpoch) return;
   const frame = $("slide-frame");
   if (frame) { frame.style.width = `${size.width}px`; frame.style.height = `${size.height}px`; }
@@ -2812,6 +2997,32 @@ function showSelMenu(rect) {
 }
 function hideSelMenu() { $("sel-menu").hidden = true; }
 
+/** 建批注时随身的精确定位字段（服务端白名单放行，见 server.mjs） */
+function anchorPayload(source) {
+  const p = source || pending || {};
+  return {
+    ...(Number.isFinite(p.pageIndex) ? { pageIndex: p.pageIndex } : {}),
+    ...(Number.isFinite(p.textOffset) ? { textOffset: p.textOffset } : {}),
+    ...(Number.isFinite(p.textLen) ? { textLen: p.textLen } : {}),
+    ...(typeof p.pageFp === "string" && p.pageFp ? { pageFp: p.pageFp } : {}),
+  };
+}
+
+/** 从 root 起算，(node, offset) 在原文里的字符偏移；不在 root 内返回 -1 */
+function offsetWithin(root, node, offset) {
+  if (!node) return -1;
+  const owner = root.ownerDocument || document;
+  if (node.nodeType !== 3) return -1; // 选区落在元素上（罕见）就不做精确偏移，交给搜索兜底
+  const walker = owner.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let total = 0;
+  let current;
+  while ((current = walker.nextNode())) {
+    if (current === node) return total + Math.min(offset, current.nodeValue.length);
+    total += current.nodeValue.length;
+  }
+  return -1;
+}
+
 function captureTextSelection(root, selection, rectOffset = { left: 0, top: 0 }) {
   if (state.mode === "image") return; // 图片走区域框选，不参与文字选区
   if (state.canvasTool === "region") return; // 区域工具拖框中：不触发文字浮条（且不 stopPropagation 挡掉 region 的 mouseup 监听）
@@ -2835,12 +3046,24 @@ function captureTextSelection(root, selection, rectOffset = { left: 0, top: 0 })
     width: innerRect.width,
     height: innerRect.height,
   };
+  // 精确定位信息：页号 + 页内原始偏移 + 该页文本指纹。
+  // 指纹一致时直接按偏移落点（零猜测）；内容变了指纹就对不上，自动退回规范化搜索。
+  const anchorEl = selection.anchorNode
+    ? (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)
+    : null;
+  const pageEl = anchorEl ? anchorEl.closest(".pdf-page") : null;
+  const scopeRoot = pageEl || root;
+  const startOffset = offsetWithin(scopeRoot, range.startContainer, range.startOffset);
+  const endOffset = offsetWithin(scopeRoot, range.endContainer, range.endOffset);
   pending = {
     quote: text,
     prefix: String(before).slice(-40),
     suffix: String(after).slice(0, 40),
     worldY: toWorld(rect.left, rect.top).y,
     clientRect: rect,
+    ...(pageEl && Number.isFinite(Number(pageEl.dataset.page)) ? { pageIndex: Number(pageEl.dataset.page) } : {}),
+    ...(startOffset >= 0 && endOffset > startOffset ? { textOffset: startOffset, textLen: endOffset - startOffset } : {}),
+    pageFp: textFingerprint(scopeRoot.textContent || ""),
   };
   showSelMenu(rect);
 }
@@ -3017,7 +3240,7 @@ $("sel-menu").addEventListener("click", async (event) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       kind, quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
-      body: "", x: RAIL_X, y, round: state.round ?? 0,
+      body: "", x: RAIL_X, y, round: state.round ?? 0, ...anchorPayload(pending),
     }),
   });
   const quote = pending.quote;
@@ -3102,7 +3325,7 @@ async function runComposerFlush() {
         quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
         body, x: RAIL_X, y: freeSpotNear(pending.worldY),
         kind: pending.kind || "text-quote", region: pending.region || null, image: pending.image || null,
-        round: state.round ?? 0,
+        round: state.round ?? 0, ...anchorPayload(pending),
       }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
@@ -3255,6 +3478,10 @@ $("page").addEventListener("dblclick", (event) => {
 });
 
 function syncWorkspaceModeUi() {
+  const officeHelp = document.getElementById('office-help-button');
+  if (officeHelp) officeHelp.hidden = state.mode !== 'pptx';
+  const officeBtn = document.getElementById('office-edit-button');
+  if (officeBtn) officeBtn.hidden = !['docx', 'pptx'].includes(state.mode);
   document.body.dataset.workspaceMode = state.workspaceMode;
   document.querySelectorAll("#workspace-modes [data-workspace-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.workspaceMode === state.workspaceMode);
@@ -3543,16 +3770,42 @@ $("viewport").addEventListener("mousedown", (event) => {
   window.addEventListener("mouseup", up);
 });
 
+/* B03：触控板缩放。
+   旧实现是 `deltaY < 0 ? 1.1 : 1/1.1` —— 每个 wheel 事件当作一个固定倍率按钮，
+   忽略手势幅度与 deltaMode。触控板一次轻捏会连发几十个事件，于是轻微动作也跳档。
+   现在：deltaMode 归一化 → 帧内合并 → 连续指数映射，倍率随手势量平滑变化。 */
+let wheelZoomAccum = 0;
+let wheelZoomFrame = 0;
+let wheelZoomPoint = { x: 0, y: 0 };
+const WHEEL_ZOOM_SENSITIVITY = 0.0022; // exp 系数：约每 100px 手势 ≈ 1.25 倍
+const WHEEL_ZOOM_MAX_STEP = 0.18; // 单帧最大倍率变化，封住「一帧跳档」
+
+function flushWheelZoom() {
+  wheelZoomFrame = 0;
+  const dy = Math.max(-140, Math.min(140, wheelZoomAccum)); // 一帧内累计也要封顶
+  wheelZoomAccum = 0;
+  if (!dy) return;
+  const factor = Math.exp(-dy * WHEEL_ZOOM_SENSITIVITY);
+  zoomAt(Math.min(1 + WHEEL_ZOOM_MAX_STEP, Math.max(1 - WHEEL_ZOOM_MAX_STEP, factor)), wheelZoomPoint.x, wheelZoomPoint.y);
+}
+
 $("viewport").addEventListener("wheel", (event) => {
-  if (!isCanvasMode() && !(event.ctrlKey || event.metaKey)) return;
-  event.preventDefault();
-  if (event.ctrlKey || event.metaKey) {
-    zoomAt(event.deltaY < 0 ? 1.1 : 1 / 1.1, event.clientX, event.clientY);
-  } else {
+  const zoomGesture = event.ctrlKey || event.metaKey;
+  // 普通双指滚动：阅读态交给原生滚动（不抢），画布态才平移视野
+  if (!zoomGesture) {
+    if (!isCanvasMode()) return;
+    event.preventDefault();
     view.panX -= event.deltaX;
     view.panY -= event.deltaY;
     applyTransform();
+    return;
   }
+  event.preventDefault();
+  // deltaMode 归一化：0=像素 1=行 2=页（不归一化时鼠标滚轮一格会被当成 1px 手势）
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? $("viewport").clientHeight : 1;
+  wheelZoomAccum += event.deltaY * unit;
+  wheelZoomPoint = { x: event.clientX, y: event.clientY };
+  if (!wheelZoomFrame) wheelZoomFrame = requestAnimationFrame(flushWheelZoom);
 }, { passive: false });
 
 $("btn-in").addEventListener("click", () => {
@@ -4095,6 +4348,59 @@ window.addEventListener("popstate", (event) => {
   if (path && path !== state.path) openDoc(path, { push: false });
 });
 
+const officeEditButton = document.createElement('button');
+officeEditButton.id = 'office-edit-button';
+officeEditButton.className = 'chip';
+officeEditButton.textContent = '修改文字';
+officeEditButton.hidden = true;
+document.getElementById('workspace-modes').after(officeEditButton);
+const officeHelpButton = document.createElement('button');
+officeHelpButton.id = 'office-help-button'; officeHelpButton.className = 'chip';
+officeHelpButton.textContent = '预览设置'; officeHelpButton.hidden = true;
+officeHelpButton.onclick = () => {
+  const path = state.path;
+  showOfficeSetup(() => { if (path === state.path) renderPptx(document.getElementById('doc'), true); });
+};
+officeEditButton.after(officeHelpButton);
+officeEditButton.addEventListener('click', async () => {
+  const path = state.path;
+  officeEditButton.disabled = true;
+  try {
+    const response = await fetch(`/api/office-text?p=${encodeURIComponent(path)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取失败');
+    if (path !== state.path) return;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'office-editor';
+    dialog.innerHTML = '<h2>修改文字</h2><p class="office-notice">适合小范围改字，不支持重排版。文字按原文件的格式片段列出。保存生成新文件，原件及原批注保留；新文件不会自动继承批注，请核对版式与保留要求。</p><div class="office-fields"></div><footer><span role="status"></span><button class="chip" data-close>取消</button><button class="chip" data-save>保存为新文件</button></footer>';
+    const fields = dialog.querySelector('.office-fields');
+    for (const segment of data.segments) {
+      const label = document.createElement('label');
+      label.textContent = `${segment.part === 'word/document.xml' ? '正文' : segment.part.split('/').pop()} · 片段 ${segment.id.split(':').pop()}`;
+      const input = document.createElement('textarea');
+      input.value = segment.text; input.dataset.id = segment.id;
+      label.append(input); fields.append(label);
+    }
+    dialog.querySelector('[data-close]').onclick = () => dialog.close();
+    dialog.addEventListener('close', () => dialog.remove(), {once:true});
+    dialog.querySelector('[data-save]').onclick = async (event) => {
+      const button = event.currentTarget;
+      const original = new Map(data.segments.map(s => [s.id,s.text]));
+      const edits = [...fields.querySelectorAll('textarea')].filter(el => el.value !== original.get(el.dataset.id)).map(el => ({id:el.dataset.id,text:el.value}));
+      if (!edits.length) { dialog.querySelector('[role=status]').textContent = '尚未修改文字'; return; }
+      button.disabled = true;
+      try {
+        const res = await fetch(`/api/office-text?p=${encodeURIComponent(path)}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:data.revision,edits})});
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || '保存失败');
+        dialog.close(); await loadTree(); await openDoc(result.path); toast('已另存新文件，原件不变。请核对排版。');
+      } catch (error) { dialog.querySelector('[role=status]').textContent = error.message; }
+      finally { button.disabled = false; }
+    };
+    document.body.append(dialog); dialog.showModal();
+  } catch (error) { toast(error.message); }
+  finally { officeEditButton.disabled = false; }
+});
 loadTree().then(async () => {
   syncWorkspaceModeUi();
   bindPeek($("doc")); // #doc 是稳定容器，委托一次即可覆盖后续所有重渲染
