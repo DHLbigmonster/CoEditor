@@ -13,7 +13,7 @@
 <link rel="icon" href="assets/logo.svg" />
 <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="landing">
 
 <header class="nav">
   <div class="wrap">
@@ -32,14 +32,14 @@
 <main>
 
   <div class="wrap hero">
-    <h1>把想法留在原文里。</h1>
-    <p class="lead">打开本地文档，直接批注、保留或修改。连接你的 AI 工具，让后续改稿也能读到这些要求。</p>
+    <p class="eyebrow">CoEditor · 文档与 AI，一起改</p>
+    <h1>哪里想改，<br />就写在哪里。</h1>
+    <p class="lead">在 Agent 的浏览器侧边栏打开文档，选中一句话，留下修改意见。下次继续写，这些批注还在。</p>
     <div class="actions">
       <a class="btn btn-primary" href="https://github.com/DHLbigmonster/CoEditor" data-cta="get">在 GitHub 获取</a>
       <a class="btn btn-ghost" href="demo.html">试着批注一段</a>
     </div>
-    <p class="sub">本地文件 · 多格式批注 · 可追溯的修改意见<br />
-      <span style="color:var(--amber)">首个公开测试版正在准备，暂无预编译安装包——一条 Node 命令即可启动。</span></p>
+    <p class="sub"><a href="https://github.com/DHLbigmonster/CoEditor/releases/tag/v1.6.0">v1.6.0 公开测试版</a> · 开源 · 本地保存<br />暂无预编译安装包，源码启动需要 Node.js 18 或更新版本。<a href="download.html">查看安装步骤</a></p>
 
     <div class="hero-shot">
       <img src="assets/app-reading.png" width="1440" height="900"
@@ -49,8 +49,8 @@
 
   <section id="product">
     <div class="wrap">
-      <h2>三个动作就够了</h2>
-      <p class="sec-lead">选中一句话，然后决定它是「要改」「要留」还是「要删」。不需要学编号、批次或提示词。</p>
+      <h2>读到哪里，改到哪里。</h2>
+      <p class="sec-lead">论文里待补的解释，简历里想留下的经历，都可以直接标在原文上。</p>
       <div class="grid3">
         <div class="card">
           <h3>写批注</h3>
@@ -62,11 +62,11 @@
         </div>
         <div class="card">
           <h3>提出删除</h3>
-          <p>建议删掉这一句。<span class="m-strike">克制的删除线</span>，正文仍然可读——这是建议，不是真的删掉文件内容。</p>
+          <p>给多余的句子加上<span class="m-strike">删除线</span>。原文暂时留下，供改稿时核对。</p>
         </div>
       </div>
       <p class="sec-lead" style="margin-top:26px">
-        实例（下面这段就是三种标记的真实样子）：
+        一段示例，看看批注怎样留在正文里。
       </p>
       <div class="card mark-demo">
         门店按城市线级分层抽样，<span class="m-comment">写字楼商圈的样本量在此处需要补充口径说明</span>。
@@ -80,19 +80,19 @@
   <section id="persist">
     <div class="wrap">
       <h2>改过之后，要求还在</h2>
-      <p class="sec-lead">意见不是聊天记录，是随文档走的资产。关掉窗口、换个会话、隔几周再回来，它们都还在。</p>
+      <p class="sec-lead">批注和引用原文一起保存。重新打开文档，或让已接入的 Agent 在新会话里读取，都能接着上次的意见往下改。</p>
       <div class="grid3">
         <div class="card">
           <h3>已处理的会变灰</h3>
-          <p><span class="m-done">这一句已经被改过了</span>，标记变灰但不消失；历史保留，随时能翻回去看当初为什么这么改。</p>
+          <p>Agent 标记已处理后，<span class="m-done">对应意见变灰</span>。你可以回看原来的要求，核对改稿结果。</p>
         </div>
         <div class="card">
           <h3>保留是长期的</h3>
-          <p>「保留」不会因为改完一轮就失效。下一轮改稿时，它仍然作为硬约束下发给 Agent。</p>
+          <p>保留要求持续提供给 Agent，直到你主动取消。改稿后可核对这些内容是否还在。</p>
         </div>
         <div class="card">
           <h3>找不到原文会说清楚</h3>
-          <p>句子被整段替换掉时不乱画线、不假装成功，而是标成「原文已变化」等你确认。</p>
+          <p>原来的句子已被替换时，批注会提示原文变化，并留下当时的引用供你查阅。</p>
         </div>
       </div>
     </div>
@@ -102,7 +102,7 @@
     <div class="wrap">
       <h2>你的文件，继续用原来的格式</h2>
       <p class="sec-lead">
-        跨格式的承诺是<b>统一的批注体验</b>，不是「每种格式都能随便改」。下面是真实边界，不是宣传语。
+        同一个文件夹里的 PDF、Markdown 和 HTML，可以放在一起阅读。编辑能力随文件格式而有所不同。
       </p>
       <div class="table-wrap">
         <table>
@@ -121,8 +121,7 @@
         </table>
       </div>
       <p class="note" style="margin-top:20px">
-        <b>关于 PPT：</b>没装可选组件时，PPT 走文字模式——可以读文字、改文字、批注，但没有逐页排版预览。
-        我们不假装「PPT 完整支持」。
+        PPT 默认提供文字模式。需要查看完整幻灯片排版时，可以另外安装 LibreOffice，安装步骤见<a href="help.html">帮助页面</a>。
       </p>
     </div>
   </section>
@@ -130,7 +129,7 @@
   <section id="how">
     <div class="wrap">
       <h2>开始只需打开文件夹</h2>
-      <p class="sec-lead">要求 Node.js ≥ 18。<b>不需要 npm install</b> —— 运行时依赖已经随仓库带走。</p>
+      <p class="sec-lead">准备好 Node.js 18 或更新版本，下载源码即可启动。运行所需的依赖已包含在仓库中。</p>
       <div class="steps">
         <div class="step">
           <div>
@@ -150,7 +149,7 @@ cd CoEditor</pre>
           <div>
             <b>已有 AI 工具？连接一次即可</b>
             左下角点「连接 Agent」，把给出的 MCP 配置粘到你的 Agent 里。之后每次改稿，
-            它都会读到这些批注。<br />
+            请它按文档批注继续修改。<br />
             <span style="color:var(--ink-faint);font-size:13.5px">
               状态灯的含义：<b>连接 Agent</b>（还没接过）→ <b>等待 Agent 读取</b>（配置已就绪）→
               <b>已连接</b>（确实有 Agent 读过批注）。
@@ -159,8 +158,7 @@ cd CoEditor</pre>
         </div>
       </div>
       <p class="note" style="margin-top:22px">
-        <b>别误会：</b>装好 CoEditor 并不会让「任何 AI 自动知道你打开了哪个目录」。
-        你需要按上面的方式连接一次；不连接也能正常阅读和批注。
+        连接 Agent 需要一次配置。你也可以先用 CoEditor 阅读和批注，稍后再连接。
       </p>
     </div>
   </section>
@@ -223,5 +221,16 @@ cd CoEditor</pre>
   </div>
 </footer>
 
+<script>
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+  const observer = new IntersectionObserver(entries => entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.animate([{opacity:.55, transform:'translateY(14px)'}, {opacity:1, transform:'translateY(0)'}], {duration:420, easing:'cubic-bezier(.2,.7,.2,1)'});
+      observer.unobserve(entry.target);
+    }
+  }), {threshold:.12});
+  document.querySelectorAll('main section > .wrap, .hero-shot').forEach(el => observer.observe(el));
+}
+</script>
 </body>
 </html>

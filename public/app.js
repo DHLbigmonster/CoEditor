@@ -141,7 +141,7 @@ function feedbackTabs() {
  let html = '<div class="feedback-tabs" role="tablist" aria-label="反馈分类">';
  html += main.map(([key, name]) => '<button role="tab" aria-selected="' + (feedbackFilter === key) + '" data-feedback="' + key + '">' + name + ' <b>' + groupCount(key) + '</b></button>').join('');
  const histCount = groupCount('history');
- html += '<details class="tabs-more"><summary title="保留要求与版本对照">⋯</summary><div>'
+ html += '<details class="tabs-more"><summary title="保留要求与版本对照" aria-label="更多分组：保留与版本对照">⋯</summary><div>'
       + '<button data-feedback="history">更早的意见 <b>' + histCount + '</b></button>'
       + '<button data-feedback="retained">保留 <b>' + groupCount('retained') + '</b></button>'
       + '<button data-feedback="versions">版本对照 <b>' + versionState.list.length + '</b></button>'
@@ -769,7 +769,7 @@ function cardElement(annotation) {
   } else if (annotation.status === "active") {
     actions = '<button data-act="edit">编辑</button><button data-act="addressed">已处理</button><button data-act="delete" class="danger">删除</button>'
       + (conflicting.length ? '<button data-act="supersede">以此为准</button>' : '')
-      + '<details class="c-more"><summary title="更多">⋯</summary><div><button data-act="deprecated">移到历史</button></div></details>';
+      + '<details class="c-more"><summary title="更多操作" aria-label="更多操作">⋯</summary><div><button data-act="deprecated">移到历史</button></div></details>';
   } else {
     actions = '<button data-act="revive">恢复</button><button data-act="delete" class="danger">删除</button>';
   }
@@ -777,8 +777,9 @@ function cardElement(annotation) {
     <div class="c-head">
       ${KIND_BADGE[annotation.kind] || ""}${LOST_BADGE}
       ${annotation.status === "addressed" ? '<span class="c-done">已修改 ✓</span>' : ""}
-      ${annotation.status === "stale" ? '<span class="c-badge" style="color:#8a6116">需确认位置</span>' : ""}
-      ${annotation.status !== "active" ? `<span class="c-badge">${LABELS[annotation.status] || annotation.status}</span>` : ""}
+      ${/* 只渲染一次状态徽章：stale 在 LABELS 里已经是「需确认位置」，
+           原来两行都命中，卡片头上会出现两个一模一样的琥珀标签 */""}
+      ${annotation.status !== "active" ? `<span class="c-badge"${annotation.status === "stale" ? ' style="color:#8a6116"' : ""}>${LABELS[annotation.status] || annotation.status}</span>` : ""}
       ${annotation.__drifted ? '<span class="c-flag">漂移</span>' : ""}
       ${annotation.__lost ? '<span class="c-flag">锚点失效</span>' : ""}
       ${conflicting.length ? `<span class="c-conflict" title="与 ${conflicting.map(displayNo).join("、")} 针对同一处原文，需裁定">冲突 ${conflicting.map(displayNo).join("/")}</span>` : ""}

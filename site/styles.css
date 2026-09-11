@@ -1,16 +1,16 @@
 /* CoEditor 官网样式：与产品同一套颜色变量，静态优先、无构建、无第三方 */
 
 :root {
-  --bg: #f7f7f3;
+  --bg: #ffffff;
   --paper: #ffffff;
-  --ink: #252923;
-  --ink-dim: #62675f;
-  --ink-faint: #8b8f87;
-  --line: #e6e8e1;
-  --brand: #42664d;
-  --brand-soft: #eef2ec;
+  --ink: #191919;
+  --ink-dim: #595959;
+  --ink-faint: #727272;
+  --line: #e8e8e8;
+  --brand: #191919;
+  --brand-soft: #f4f4f4;
   --green: #39805a;
-  --amber: #a8701a;
+  --amber: #595959;
   --warm: rgba(228, 190, 74, .16);
   --radius: 10px;
   --maxw: 1140px;
@@ -42,7 +42,7 @@ img { max-width: 100%; height: auto; display: block; }
 .nav {
   position: sticky; top: 0; z-index: 20; height: 64px;
   display: flex; align-items: center;
-  background: rgba(247, 247, 243, .88);
+  background: rgba(255, 255, 255, .94);
   backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--line);
 }
@@ -56,7 +56,7 @@ img { max-width: 100%; height: auto; display: block; }
   padding: 7px 15px; border-radius: 8px; font-size: 14px;
   background: var(--brand); color: #fff !important;
 }
-.nav-cta:hover { background: #37543f; text-decoration: none; }
+.nav-cta:hover { background: #383838; text-decoration: none; }
 
 /* ---------------- 按钮 ---------------- */
 .btn {
@@ -65,7 +65,7 @@ img { max-width: 100%; height: auto; display: block; }
   font-size: 15px; font-weight: 500; cursor: pointer; font-family: inherit;
 }
 .btn-primary { background: var(--brand); color: #fff; }
-.btn-primary:hover { background: #37543f; text-decoration: none; }
+.btn-primary:hover { background: #383838; text-decoration: none; }
 .btn-ghost { background: var(--paper); border-color: var(--line); color: var(--ink); }
 .btn-ghost:hover { border-color: #cfd2c8; text-decoration: none; }
 
@@ -237,6 +237,39 @@ footer a { color: var(--ink-dim); }
   .demo-doc { padding: 22px 18px; }
 }
 
+/* 品牌灰阶，批注的语义色保留。 */
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 5px; }
+.btn, .nav-cta { transition: background .16s ease, transform .16s ease; }
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(0); }
+.brand img { filter: grayscale(1); }
+.landing .hero { padding: 96px 24px 44px; }
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: .04em; margin: 0 0 24px; }
+.landing .hero h1 { font-size: clamp(42px, 6vw, 76px); line-height: 1.13; letter-spacing: -.045em; font-weight: 750; margin-bottom: 26px; }
+.landing .hero .lead { max-width: 580px; font-size: 19px; line-height: 1.8; }
+.landing .hero-shot { margin-top: 64px; max-width: 1080px; padding: 16px; background: #f5f5f5; border-radius: 16px; }
+.landing .hero-shot img { border-radius: 8px; box-shadow: 0 8px 24px #00000009; }
+.landing section { padding: 88px 0; scroll-margin-top: 64px; }
+.landing h2 { font-size: clamp(28px, 3.4vw, 42px); line-height: 1.3; letter-spacing: -.025em; }
+.landing .grid3 { gap: 36px; margin-top: 40px; }
+.landing .grid3 .card { padding: 0; border: 0; border-radius: 0; }
+.landing .card h3 { font-size: 19px; margin-bottom: 12px; }
+.landing .card p { font-size: 16px; line-height: 1.8; }
+.landing .mark-demo { background: #f7f7f7; padding: 32px; border: 0; }
+.landing #persist { background: #fafafa; }
+.landing #persist .card { background: transparent; }
+.landing details.faq { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 20px 0; }
+.landing .note, pre, .step code, code.inline { background: #f5f5f5; }
+@media (max-width:640px) {
+  .nav-links { display:flex; gap:12px; }
+  .nav-links > a:not(.nav-cta) { display:none; }
+  .nav .wrap { gap:12px; }
+  .landing .hero { padding:56px 20px 24px; }
+  .landing .hero .lead { font-size:17px; }
+  .landing .hero-shot { margin-top:36px; padding:6px; }
+  .landing section { padding:54px 0; }
+  .landing .grid3 { gap:28px; }
+}
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

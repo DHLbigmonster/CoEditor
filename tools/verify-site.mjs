@@ -43,7 +43,7 @@ try {
     const m = await metrics();
     record(`${w}px：首页无横向溢出`, m.overflow <= 1,
       `overflow=${m.overflow}${m.offenders.length ? " 越界=" + JSON.stringify(m.offenders) : ""}`);
-    record(`${w}px：首屏标题是「把想法留在原文里。」`, m.h1 === "把想法留在原文里。", JSON.stringify(m.h1));
+    record(`${w}px：首屏显示新版产品标题`, m.h1 === "哪里想改，就写在哪里。", JSON.stringify(m.h1));
     record(`${w}px：图片全部加载成功`, m.imgs.every((i) => i.ok), JSON.stringify(m.imgs.map((i) => `${i.src}:${i.ok ? i.w + "px" : "加载失败"}`)));
     await page.shot(`${OUT}/site-${w}.png`);
   }
