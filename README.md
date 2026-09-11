@@ -9,6 +9,8 @@
 
 **给 AI 的修改意见，不再丢在聊天记录里。**
 
+官网（含可交互演示）：<https://dhlbigmonster.github.io/CoEditor/> · 发布说明：[Releases](https://github.com/DHLbigmonster/CoEditor/releases)
+
 <p align="center">
   <img src="docs/logo/logo.svg" width="120" alt="CoEditor" />
 </p>
