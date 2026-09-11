@@ -4,20 +4,20 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
 
 // 渲染 PDF 为「连续长纸：页面 canvas + 自建文本层 span」，文本层供批注锚定使用。
 // 宽度自适应容器（消除横向溢出），cols 支持 1/2/3 列阅读布局。
-// v0.7.5：画布按需绘制（IntersectionObserver）——文本层与结构即时建立（锚定/检索/批注不受影响），
-// 昂贵的 page.render 只画视口附近（±900px）的页面；长文档不再全量渲染卡顿。
 //
 // 缩放策略（2026-09-11 重做，对齐 PDF.js 官方 viewer 的做法）：
 //   mozilla/pdf.js 的 pdf_viewer.css 里，`.pdfViewer` 只持有一个 `--scale-factor`，
-//   `.page` 上算出 `--total-scale-factor`，而 canvas 是 `width:100%; height:100%`
-//   ——缩放时**只改 CSS 尺寸与 scale-factor，不重建 DOM**，位图分辨率随后异步补齐。
-//   我们原来每次缩放都 `container.innerHTML = ""` 全量重建（实测一次捏合清空 414 个节点、
+//   `.page` 上算出 `--total-scale-factor`，canvas 是 `width:100%; height:100%`
+//   —— 缩放时**只改 CSS 尺寸与 scale-factor，不重建 DOM**，位图分辨率随后异步补齐。
+//   我们原来每次缩放都 `container.innerHTML = ""` 全量重建（一次捏合清空 414 个节点、
 //   3.3 秒才稳定、期间整片空白），所以手感一卡一卡。
-//   现在分成两步：
-//     rescale() —— 同步改宽度/高度/--total-scale-factor 与 canvas 的 CSS 尺寸（O(页数)，立即有反馈）
-//     sharpen() —— 防抖后用离屏 canvas 按新分辨率重画，画完一次性贴回（旧位图全程可见，不闪白）
-//   文本层位置本来就是百分比（left/top 为 %），字号由 --total-scale-factor 驱动，
-//   所以不重建也不会错位；批注 <mark> 在文本层里，同样跟着一起缩放，不需要重新锚定。
+//
+// 位图绘制只有一个入口 renderBitmap(rec, scale, gen)：
+//   - 所有页面由 IntersectionObserver 驱动（进视口 ±900px 才画），**用的是当时的倍率**；
+//     旧实现把构建时的 viewport 快照存在队列里，缩放后滚到后面的页会按旧倍率画（糊的）。
+//   - 每条记录持有自己的 renderTask，开新任务前先 cancel 旧的；
+//   - 画完还要再验一次代次，旧任务的结果直接丢掉，绝不覆盖新倍率。
+//   - 用离屏 canvas 画好再一次性贴回：可见 canvas 全程有图，不闪白。
 
 window.renderPdfToContainer = async function renderPdfToContainer(container, url, { cols = 1, maxScale = 1.4, zoom = 1 } = {}) {
   container.innerHTML = "";
@@ -37,7 +37,7 @@ window.setPdfZoom = function setPdfZoom(container, zoom) {
   const scale = v.fitScale * zoom;
   v.zoom = zoom;
   v.scale = scale;
-  v.gen += 1; // 代次：正在跑的位图任务作废，不得回写到新尺寸上
+  v.gen += 1; // 代次：所有在飞的位图任务作废，不得回写到新尺寸上
   for (const rec of v.records) {
     const vp = rec.page.getViewport({ scale });
     rec.viewport = vp;
@@ -53,7 +53,8 @@ window.setPdfZoom = function setPdfZoom(container, zoom) {
   return { scale, zoom };
 };
 
-/** 第二步：防抖后按新分辨率重画视口附近的位图 */
+/** 缩放后：把「当前就在视口里」的页按新倍率重画一遍
+    （IntersectionObserver 只在进出视口时触发，已经可见的页不会自己再触发） */
 function scheduleSharpen() {
   clearTimeout(sharpenTimer);
   sharpenTimer = setTimeout(() => { sharpen().catch(() => {}); }, 180);
@@ -63,44 +64,79 @@ async function sharpen() {
   const v = view;
   if (!v || !v.scale) return;
   const gen = v.gen;
-  const scroller = v.container.closest("#viewport");
-  const vr = scroller ? scroller.getBoundingClientRect() : { top: -1e9, bottom: 1e9 };
+  const near = nearViewport(v);
   for (const rec of v.records) {
     if (gen !== v.gen) return; // 又缩放过：这一轮全部作废
-    if (!rec.canvas.isConnected) continue;
     if (rec.sharpScale === v.scale) continue;
-    const r = rec.wrapper.getBoundingClientRect();
-    if (r.bottom < vr.top - 900 || r.top > vr.bottom + 900) continue; // 不在视口附近，等滚进来再画
+    if (!near(rec.wrapper)) continue; // 远处的页等滚进来再画（由 observer 负责）
     await renderBitmap(rec, v.scale, gen);
   }
 }
 
-/** 离屏画好再一次性贴回：避免 canvas 重设尺寸瞬间变白 */
+/** 进视口就按「当前倍率」补齐——这是远页清晰的关键 */
+function startObserver(v) {
+  v.io?.disconnect();
+  if (!("IntersectionObserver" in window)) {
+    v.records.forEach((rec) => ensureSharp(rec));
+    return;
+  }
+  const scroller = v.container.closest("#viewport") || null;
+  v.io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const rec = v.records.find((r) => r.wrapper === entry.target);
+      if (rec) ensureSharp(rec);
+    }
+  }, { root: scroller, rootMargin: "900px 0px" });
+  v.records.forEach((rec) => v.io.observe(rec.wrapper));
+}
+
+function nearViewport(v) {
+  const scroller = v.container.closest("#viewport");
+  const vr = scroller ? scroller.getBoundingClientRect() : { top: -1e9, bottom: 1e9 };
+  return (el) => {
+    const r = el.getBoundingClientRect();
+    return r.bottom >= vr.top - 900 && r.top <= vr.bottom + 900;
+  };
+}
+
+function ensureSharp(rec) {
+  const v = view;
+  if (!v || !v.scale) return null;
+  if (rec.sharpScale === v.scale) return null; // 已经是当前倍率，不重复画
+  return renderBitmap(rec, v.scale, v.gen);
+}
+
+/** 唯一的位图入口：离屏画好再贴回；旧任务先取消，过期结果直接丢 */
 async function renderBitmap(rec, scale, gen) {
+  if (rec.task) { try { rec.task.cancel(); } catch { /* 已结束 */ } rec.task = null; }
   const viewport = rec.page.getViewport({ scale });
   const outputScale = Math.max(1, window.devicePixelRatio || 1);
   const off = document.createElement("canvas");
   off.width = Math.max(1, Math.floor(viewport.width * outputScale));
   off.height = Math.max(1, Math.floor(viewport.height * outputScale));
+  const task = rec.page.render({
+    canvasContext: off.getContext("2d"),
+    viewport,
+    transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
+  });
+  rec.task = task;
   try {
-    await rec.page.render({
-      canvasContext: off.getContext("2d"),
-      viewport,
-      transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
-    }).promise;
+    await task.promise;
   } catch (error) {
-    if (String(error?.name || "").includes("Cancelled")) return;
+    rec.task = null;
+    if (String(error?.name || "").includes("Cancelled")) return; // 被更新的任务顶掉了，静默
     markPaintError(rec, error);
     return;
   }
-  if (gen !== view?.gen || !rec.canvas.isConnected) return; // 过期结果直接丢
+  rec.task = null;
+  if (gen !== view?.gen || !rec.canvas.isConnected) return; // 期间又缩放/换文档：旧结果丢弃
   rec.canvas.width = off.width;
   rec.canvas.height = off.height;
   rec.canvas.style.width = `${viewport.width}px`;
   rec.canvas.style.height = `${viewport.height}px`;
   rec.canvas.getContext("2d").drawImage(off, 0, 0);
   rec.canvas.dataset.painted = "1";
-  rec.rec = rec;
   rec.sharpScale = scale;
   rec.wrapper.querySelector(".pdf-retry")?.remove();
   rec.wrapper.classList.remove("pdf-paint-error");
@@ -115,7 +151,7 @@ function markPaintError(rec, error) {
   bar.innerHTML = `<span>本页渲染失败：${String(error && error.message || error).slice(0, 80)}</span>`;
   const retry = document.createElement("button");
   retry.textContent = "重试";
-  retry.addEventListener("click", () => { rec.canvas.dataset.painted = ""; renderBitmap(rec, view?.scale || rec.viewport.scale, view?.gen ?? 0); });
+  retry.addEventListener("click", () => { rec.canvas.dataset.painted = ""; rec.sharpScale = null; ensureSharp(rec); });
   bar.appendChild(retry);
   rec.wrapper.appendChild(bar);
 }
@@ -136,27 +172,6 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   container.classList.toggle("pdf-multi", cols > 1);
 
   const outputScale = Math.max(1, window.devicePixelRatio || 1);
-  const paintQueue = [];
-  let paintChain = Promise.resolve();
-
-  const paint = (item) => {
-    paintChain = paintChain
-      .then(async () => {
-        if (item.canvas.dataset.painted === "1" || !item.canvas.isConnected) return;
-        try {
-          const context = item.canvas.getContext("2d");
-          const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
-          await item.page.render({ canvasContext: context, viewport: item.viewport, transform }).promise;
-          item.canvas.dataset.painted = "1"; // 真正画完才算 painted——失败留空不能冒充加载成功
-          if (item.rec) item.rec.sharpScale = item.scale;
-          item.wrapper.querySelector(".pdf-retry")?.remove();
-          item.wrapper.classList.remove("pdf-paint-error");
-        } catch (error) {
-          if (item.rec) markPaintError(item.rec, error);
-        }
-      });
-    return paintChain;
-  };
 
   let text = "";
   const textJobs = [];
@@ -196,7 +211,7 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
 
     container.appendChild(wrapper);
 
-    const rec = { pageNumber, page, wrapper, canvas, layer, viewport, sharpScale: null, renderTask: null };
+    const rec = { pageNumber, page, wrapper, canvas, layer, viewport, sharpScale: null, task: null };
     records.push(rec);
 
     // 文本提取（批注锚定、全文提取、检索都依赖 text 字符串）与文字层渲染解耦
@@ -210,19 +225,10 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
     // 官方 TextLayer 并行渲染：占位结构按页序即时出现，首屏不被长文档的串行 DOM 构建阻塞
     const textLayer = new pdfjsLib.TextLayer({ textContentSource: content, container: layer, viewport });
     textJobs.push(textLayer.render());
-
-    // 首屏两页立即绘制，其余进入按需队列（item 必须带 wrapper：失败重试 UI 要挂上去，
-    // 而且任何一项的异常都不能污染 paintChain 导致后续页永不绘制）
-    const item = { page, canvas, viewport, wrapper, rec, scale };
-    if (pageNumber <= 2) {
-      paint(item);
-    } else {
-      paintQueue.push(item);
-    }
   }
   await Promise.all(textJobs);
 
-  view = { container, pdf, cols, maxScale, fitScale, zoom, scale, records, gen: 0 };
+  view = { container, pdf, cols, maxScale, fitScale, zoom, scale, records, gen: 0, io: null };
 
   // 扫描件（无文字层）：明确说明能力边界——区域批注可用，不承诺不存在的 OCR
   if (!text.trim() && pdf.numPages > 0 && !container.querySelector(".pdf-scan-hint")) {
@@ -235,25 +241,9 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   // 缩放后恢复阅读位置（上下偏差可控，优先不出视口）
   if (scrollTop > 0) container.closest("#viewport").scrollTop = scrollTop;
 
-  // 按需绘制：页面滚进视口 ±900px 才真正 render（两种模式都生效——IO 对 transform 位移同样响应）
-  if (paintQueue.length) {
-    const scrollRoot = container.closest("#viewport") || null;
-    if ("IntersectionObserver" in window) {
-      const io = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const item = paintQueue.find((p) => p.wrapper === entry.target);
-          if (!item) continue;
-          paint(item);
-          paintQueue.splice(paintQueue.indexOf(item), 1);
-          io.unobserve(entry.target);
-        }
-      }, { root: scrollRoot, rootMargin: "900px 0px" });
-      paintQueue.forEach((p) => io.observe(p.wrapper));
-    } else {
-      paintQueue.forEach((p) => paint(p)); // 兜底：无 IO 就全画
-    }
-  }
+  // 统一由 observer + sharpen 驱动绘制：首屏那几页会立刻被判定为「视口内」
+  startObserver(view);
+  view.records.filter((rec) => nearViewport(view)(rec.wrapper)).forEach((rec) => ensureSharp(rec));
 
   return { text, pages: pdf.numPages, scale, cols };
 }

@@ -991,7 +991,11 @@ body[data-workspace-mode="read"] #page {
    否则放大时 canvas 超出固定白板，像两块错位的纸 */
 body[data-workspace-mode="read"] #page:has(.pdf-page) {
   background: transparent; box-shadow: none; border-radius: 0;
-  width: max-content; min-width: var(--paper-w, 820px); max-width: none;
+  /* 纸张宽跟着阅读容器走（--paper-w 由 updatePaperWidth 按 viewport 宽算出）。
+     原来这里是 width: max-content + min-width: 820px：内容宽反过来决定容器宽，
+     窄窗口下就永远收缩不下去，容器内部横向溢出，只能靠滚动条兜着。
+     注意不要改成 overflow:hidden —— 那是把溢出藏起来，不是修好。 */
+  width: var(--paper-w, 820px); min-width: 0; max-width: none;
 }
 body[data-workspace-mode="read"] #page:has(.html-view) {
   flex: 1 1 auto; width: auto; min-width: 0; max-width: none;
@@ -1531,8 +1535,10 @@ body[data-workspace-mode="read"] #cards .card .c-actions button {
   flex: 0 0 0; width: 0; margin: 0 auto; position: relative;
   cursor: col-resize; z-index: 45; align-self: stretch;
 }
+/* 热区只往左伸：往右伸的话，反馈栏收起时它就成了行内最后一个元素，
+   那 3px 会把 #work-row / #main / body 的 scrollWidth 顶出去（实测 doc 级 3px 横向溢出） */
 #cards-resizer::before {
-  content: ""; position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+  content: ""; position: absolute; left: -6px; top: 0; bottom: 0; width: 6px;
   background: transparent; transition: background .12s;
 }
 #cards-resizer:hover::before, body.resizing-cards #cards-resizer::before { background: rgba(0, 0, 0, .12); }

@@ -72,5 +72,5 @@ try {
 }
 
 const failed = log.filter((l) => !l.ok);
-console.log(`\n结果：${log.length - failed.length}/${log.length} 通过`);
+console.log(`\nPASS ${log.length - failed.length} / FAIL ${failed.length}（共 ${log.length} 项）`);
 process.exit(failed.length ? 1 : 0);

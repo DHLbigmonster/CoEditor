@@ -9,9 +9,12 @@ const OUT = "/tmp/coeditor-p0/evidence";
 const API = "/api/annotations";
 
 const log = [];
-const record = (step, ok, detail) => {
-  log.push({ step, ok: Boolean(ok), detail });
-  console.log(`${ok ? "✅" : "❌"} ${step}${detail ? ` — ${typeof detail === "string" ? detail : JSON.stringify(detail).slice(0, 240)}` : ""}`);
+// 三态：PASS / FAIL / SKIP（SKIP = 前置条件不足，产品行为未被验证，既不算通过也不算失败）
+const record = (step, ok, detail, kind) => {
+  const state = kind || (ok ? "pass" : "fail");
+  log.push({ step, state, detail: detail == null ? "" : detail });
+  const mark = state === "skip" ? "⏭️ " : state === "pass" ? "✅" : "❌";
+  console.log(`${mark} ${step}${detail ? ` — ${typeof detail === "string" ? detail : JSON.stringify(detail).slice(0, 240)}` : ""}`);
 };
 
 await mkdir(OUT, { recursive: true });
@@ -33,12 +36,21 @@ const settleScroll = async () => {
   return prev;
 };
 
-/** 拖某个手柄到指定 clientX（真实鼠标） */
+/** 拖某个手柄到指定 clientX（真实鼠标）。
+    分隔条是零宽元素 + 溢出伪元素做热区，所以不能按「元素中心」按下去——
+    要用 elementFromPoint 在附近找出真正命中它的那一点。 */
 async function dragHandle(sel, toX, { yOffset = 0 } = {}) {
   const b = await boxOf(sel);
   if (!b) return false;
-  const y = b.y + b.h / 2 + yOffset;
-  await page.drag({ x: b.x + Math.round(b.w / 2), y }, { x: toX, y }, { steps: 10 });
+  const y = Math.round(b.y + b.h / 2 + yOffset);
+  const point = await page.eval(`
+    for (let dx = -10; dx <= 4; dx += 2) {
+      const el = document.elementFromPoint(${b.x} + dx, ${y});
+      if (el && el.id === ${JSON.stringify(sel.replace("#", ""))}) return { x: ${b.x} + dx, y: ${y} };
+    }
+    return null;`);
+  if (!point) return false;
+  await page.drag({ x: point.x, y: point.y }, { x: toX, y: point.y }, { steps: 10 });
   await sleep(250);
   return true;
 }
@@ -117,19 +129,35 @@ try {
   await page.eval(`document.querySelector('#composer-input').focus(); return 1;`);
 
   page.clearRequests();
+  // 计组合事件：用来区分「浏览器压根没进组合态（前置条件不足）」和「进了组合态却没落盘（真失败）」
+  await page.eval(`window.__comp = { start: 0, update: 0, end: 0 };
+    const i = document.querySelector('#composer-input');
+    i.addEventListener('compositionstart', () => { window.__comp.start += 1; });
+    i.addEventListener('compositionupdate', () => { window.__comp.update += 1; });
+    i.addEventListener('compositionend', () => { window.__comp.end += 1; });
+    return 1;`);
   // 组合期间：只发 composition，不发提交
   await page.imeCompose("这");
   await sleep(500);
   await page.imeCompose("这段");
   await sleep(700);
   const during = page.requestsTo(API, "POST").length;
+  const compDuring = await page.eval(`return window.__comp`);
   await page.imeCommit("这段");
   await sleep(1600);
   const afterCommit = page.requestsTo(API, "POST").length;
-  record("IME 组合期间不提交", during === 0, `组合期间 POST=${during}`);
-  record("组合结束后只提交一次", afterCommit === 1, `结束后 POST=${afterCommit}`);
   const composed = await page.eval(`return document.querySelector('#composer-input').value`);
-  record("组合文本正确落入输入框", composed.includes("这段"), JSON.stringify(composed.slice(0, 30)));
+  const compAfter = await page.eval(`return window.__comp`);
+
+  if (compAfter.start === 0) {
+    record("IME 组合期间不提交", false, `浏览器未进入组合态（compositionstart=0），本次未验证到产品行为`, "skip");
+    record("组合结束后只提交一次", false, `同上：组合未生效`, "skip");
+    record("组合文本正确落入输入框", false, `同上：组合未生效`, "skip");
+  } else {
+    record("IME 组合期间不提交", during === 0, `组合期间 POST=${during}；组合事件=${JSON.stringify(compDuring)}`);
+    record("组合结束后只提交一次", afterCommit === 1, `结束后 POST=${afterCommit}；组合事件=${JSON.stringify(compAfter)}；输入框值=${JSON.stringify(composed.slice(0, 20))}`);
+    record("组合文本正确落入输入框", composed.includes("这段"), JSON.stringify(composed.slice(0, 30)));
+  }
 
   // 组合中切走文件：不得落盘半成品
   page.clearRequests();
@@ -199,6 +227,8 @@ try {
   await page.close();
 }
 
-const failed = log.filter((l) => !l.ok);
-console.log(`\n结果：${log.length - failed.length}/${log.length} 通过`);
-process.exit(failed.length ? 1 : 0);
+const pass = log.filter((l) => l.state === "pass").length;
+const fail = log.filter((l) => l.state === "fail").length;
+const skip = log.filter((l) => l.state === "skip").length;
+console.log(`\nPASS ${pass} / FAIL ${fail} / SKIP ${skip}（共 ${log.length} 项）`);
+process.exit(fail ? 1 : 0);

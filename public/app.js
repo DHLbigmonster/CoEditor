@@ -362,10 +362,12 @@ function fitReadWidth() {
    HTML 是网页，例外：保持自适应（CSS :has 分支）。 */
 function updatePaperWidth() {
   if (isCanvasMode()) return;
-  if (state.mode === "pdf" || document.querySelector("#page .html-view")) return; // PDF/html 各有自适应
+  if (document.querySelector("#page .html-view")) return; // html 是网页，保持自适应
+  // PDF 也要走这里：原来对 PDF 直接 return，--paper-w 永远停在默认 820px，
+  // 于是窄窗口（以及宽屏把反馈栏拉开）时 #page/#doc 比阅读容器还宽，容器内部一直有横向溢出。
+  // 现在按「阅读容器可用宽 - 文档内边距」算，UI 收缩多少，纸张就跟着收多少。
   const viewport = $("viewport");
-  const cardsVisible = !document.body.classList.contains("cards-hidden") && window.innerWidth > 1180;
-  const avail = Math.max(360, viewport.clientWidth - 58); // 文档内边距（反馈栏是布局同级列，viewport 已被压缩）
+  const avail = Math.max(320, viewport.clientWidth - 58); // 58 ≈ #doc 左右内边距
   document.documentElement.style.setProperty("--paper-w", `${Math.min(820, avail)}px`);
 }
 
@@ -2698,6 +2700,8 @@ async function renderDocument() {
   const host = $("doc");
   host.classList.remove("docx-view", "html-view", "pdf-view", "image-view");
   if (state.mode === "pdf") {
+    // 先按当前阅读容器宽定纸张宽，再渲染——否则 fit 会用上一次的 #doc 宽算，窄窗口下第一屏就溢出
+    updatePaperWidth();
     host.classList.add("pdf-view");
     if (!(await waitForPdfRenderer())) {
       host.innerHTML = '<p style="color:#c99537">PDF 渲染器未能加载（离线？）。可用系统预览打开。</p>';
@@ -3865,7 +3869,12 @@ function toggleFeedbackPanel() {
   const hidden = document.body.classList.toggle("cards-hidden");
   $("btn-cards").setAttribute("aria-pressed", String(hidden));
   try { localStorage.setItem("coeditor.cardsHidden", hidden ? "1" : "0"); } catch {}
-  if (!isCanvasMode()) { updatePaperWidth(); if (state.fitFollow) fitReadWidth(); }
+  if (!isCanvasMode()) {
+    updatePaperWidth();
+    // PDF 的 fitScale 是在构建时按 #doc 宽算的：纸张宽变了必须整篇重建，光改 zoom 不够
+    if (state.mode === "pdf") schedulePdfRebuild();
+    else if (state.fitFollow) fitReadWidth();
+  }
 }
 $("btn-cards").addEventListener("click", toggleFeedbackPanel);
 $("cards-collapse").addEventListener("click", () => toggleFeedbackPanel()); // §1 头部明确收起钮
@@ -4358,7 +4367,7 @@ window.addEventListener("resize", () => {
   clearTimeout(railFitTimer);
   railFitTimer = setTimeout(() => {
     if (isCanvasMode()) return;
-    if (state.mode === "pdf") { schedulePdfRebuild(); return; } // 容器宽/DPR 变化：fitScale 要重算，只能完整重建
+    if (state.mode === "pdf") { updatePaperWidth(); schedulePdfRebuild(); return; } // 容器宽/DPR 变化：先重算纸张宽，再整篇重建
     updatePaperWidth(); // 流式文档 100% 恒适配可用宽；zoom 因子保持
   }, 200);
 });

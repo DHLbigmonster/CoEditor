@@ -14,10 +14,15 @@ const DUP_HEAD = "Quarterly observations are sampled by city tier";
 const WS_HEAD = "Whitespace check";
 const TAIL = "Tail paragraph on the second page";
 
+/* 三态统计：PASS / FAIL / SKIP。
+   SKIP 专指「测试前置条件没满足，产品行为未被验证」——它既不是通过，也不能算产品失败。
+   旧写法把这类结果记成 true（=通过），等于用没跑成的用例凑通过率。 */
 const log = [];
-const record = (step, ok, detail) => {
-  log.push({ step, ok: Boolean(ok), detail });
-  console.log(`${ok ? "✅" : "❌"} ${step}${detail ? ` — ${typeof detail === "string" ? detail : JSON.stringify(detail).slice(0, 260)}` : ""}`);
+const record = (step, ok, detail, kind) => {
+  const state = kind || (ok ? "pass" : "fail");
+  log.push({ step, state, detail: detail == null ? "" : detail });
+  const mark = state === "skip" ? "⏭️ " : state === "pass" ? "✅" : "❌";
+  console.log(`${mark} ${step}${detail ? ` — ${typeof detail === "string" ? detail : JSON.stringify(detail).slice(0, 260)}` : ""}`);
 };
 
 await mkdir(OUT, { recursive: true });
@@ -100,6 +105,30 @@ async function commitAnnotation(text) {
 }
 
 const cardCount = () => page.eval(`return document.querySelectorAll('#cards .card').length`);
+
+/* 一切验收都绑到「具体批注 ID」，不用全局标记数量或任意卡片状态代替：
+   数量对得上不代表画在对的位置，卡片状态也不保证属于同一条。 */
+async function annotationById(id) {
+  const api = await fetch(`${APP}api/annotations?p=${encodeURIComponent(DOC)}`).then((r) => r.json()).catch(() => ({}));
+  return (api.annotations || []).find((a) => a.id === id) || null;
+}
+async function annotationIdByBody(fragment) {
+  const api = await fetch(`${APP}api/annotations?p=${encodeURIComponent(DOC)}`).then((r) => r.json()).catch(() => ({}));
+  const hit = (api.annotations || []).filter((a) => (a.body || "").includes(fragment)).pop();
+  return hit ? hit.id : null;
+}
+/** 只属于这条批注的标记（含页码与几何），别的批注一个都不算 */
+const marksOf = (id) => page.eval(`
+  return [...document.querySelectorAll('#doc .pdf-text .anchor, #doc .pdf-text .mark')]
+    .filter(m => m.dataset.ann === ${JSON.stringify(id)} && (m.textContent || '').trim())
+    .map(m => { const r = m.getBoundingClientRect(); const pg = m.closest('.pdf-page');
+      return { page: pg ? Number(pg.dataset.page) : null, t: (m.textContent || '').slice(0, 30),
+               x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; });`);
+const cardOf = (id) => page.eval(`
+  const c = document.querySelector('#cards .card[data-id="' + ${JSON.stringify(id)} + '"]');
+  if (!c) return null;
+  return { status: c.dataset.status, text: (c.textContent || '').replace(/\\s+/g, ' ').slice(0, 140),
+           flags: [...c.querySelectorAll('.c-flag, .c-badge, .c-kind')].map(n => n.textContent.trim()).filter(Boolean) };`);
 
 /** 真实拖选，并等「选区工具条真的出现」——条件等待，不用固定 sleep。
     没出现就按新坐标重拖一次；仍不行则如实返回 null，由调用方记成前置条件失败。 */
@@ -188,17 +217,18 @@ try {
     const r2 = await annotate(() => lineTarget(DUP_HEAD, 1, 1), "A04-2 第二次出现的重复句，请改为引用附录 B。");
     record("重复句：两条批注都真的建成（条数各 +1）", r1.ok && r2.ok && r2.after === r1.after + 1,
       `第1条 ${r1.before}→${r1.after}${r1.reason ? " " + r1.reason : ""}；第2条 ${r2.before}→${r2.after}${r2.reason ? " " + r2.reason : ""}`);
+    // 按 ID 取两条各自的落点：不再用「全局标记里有几个落在某 y 带」来代替
+    const id1 = await annotationIdByBody("A04-1");
+    const id2 = await annotationIdByBody("A04-2");
     await reopen();
-    const dupMarks = (await marksInfo()).filter((m) => m.t.includes("Quarterly observations") || m.t.includes("oversampled"));
-    const bands = [...new Set(dupMarks.map((m) => Math.round(m.y / 10)))];
-    // 失败时把两条批注的定位字段一起打出来：分辨是"没存偏移"还是"消歧没生效"
-    const dupDiag = await page.eval(`
-      const api = await fetch('/api/annotations?p=' + encodeURIComponent(${JSON.stringify(DOC)})).then(r => r.json()).catch(() => ({}));
-      return (api.annotations || []).filter(a => (a.body || '').includes('重复句')).map(a => ({
-        no: a.no, quoteLen: (a.quote || '').length, prefixLen: (a.prefix || '').length, suffixLen: (a.suffix || '').length,
-        pageIndex: a.pageIndex, textOffset: a.textOffset, textLen: a.textLen, hasFp: Boolean(a.pageFp), anchorStatus: a.anchorStatus || null }));`);
-    record("重复句：两条批注各自锚定，未都钉到第一处", dupMarks.length >= 2 && bands.length >= 2,
-      `分片=${dupMarks.length} 位置带=${bands.length} ${JSON.stringify(dupMarks.slice(0, 2))} 定位字段=${JSON.stringify(dupDiag)}`);
+    const m1 = id1 ? await marksOf(id1) : [];
+    const m2 = id2 ? await marksOf(id2) : [];
+    const a1 = id1 ? await annotationById(id1) : null;
+    const a2 = id2 ? await annotationById(id2) : null;
+    const offsetDiff = a1 && a2 && Number.isFinite(a1.textOffset) && Number.isFinite(a2.textOffset) && a1.textOffset !== a2.textOffset;
+    const farApart = m1.length > 0 && m2.length > 0 && Math.abs(m1[0].y - m2[0].y) > 40;
+    record("重复句：两条批注各自锚定，未都钉到第一处（按 ID 校验）", Boolean(id1 && id2) && farApart && offsetDiff,
+      `id1=${m1.length}片@y${m1[0] && m1[0].y} textOffset=${a1 && a1.textOffset}；id2=${m2.length}片@y${m2[0] && m2[0].y} textOffset=${a2 && a2.textOffset}；远距=${farApart} 偏移不同=${offsetDiff}`);
     await page.shot(`${OUT}/a04-duplicate.png`);
   }
 
@@ -240,19 +270,30 @@ try {
     record("跨页拖选产生了选区", sel > 20, `选区长度=${sel}`);
     const menu = await page.eval(`const m = document.querySelector('#sel-menu');
       return { hidden: m.hidden, rect: (() => { const r = m.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })() };`);
+    const quoteBefore = await page.eval(`return String(window.getSelection() || '').trim()`);
     const before = await cardCount();
     await commitAnnotation("A04-4 这条批注跨了页边界，定位不应钉到无关位置。");
     const after = await cardCount();
-    record("跨页选区可建批注", after > before, `卡片数 ${before} → ${after} 选区工具条=${JSON.stringify(menu)}`);
+    const crossId = await annotationIdByBody("A04-4");
+    record("跨页选区可建批注", after > before && Boolean(crossId), `卡片数 ${before} → ${after} 批注ID=${crossId ? "有" : "无"} 选区工具条=${JSON.stringify(menu)}`);
+    // 落盘 quote 必须等于跨页拖到的文字（按 ID 取，不看别的批注）
+    const crossAnn = crossId ? await annotationById(crossId) : null;
+    const stripX = (v) => String(v || "").replace(/\s+/g, "");
+    record("跨页批注落盘 quote 与选中文本一致", Boolean(crossAnn) && stripX(crossAnn.quote) === stripX(quoteBefore),
+      crossAnn ? `quote长=${stripX(crossAnn.quote).length} 选区长=${stripX(quoteBefore).length}` : "取不到该批注");
     await reopen();
-    const marks = await marksInfo();
-    // 判据：标记不得出现在「拖选起点之上」——那正是"跳到文档开头/错段"的表现
-    const above = marks.filter((m) => m.y < startViewportY - 60);
-    record("跨页批注不会画到拖选起点之上（不跳文档开头/错段）", above.length === 0,
-      above.length ? JSON.stringify(above.slice(0, 3)) : `标记数=${marks.length} 起点y=${startViewportY} 最上标记y=${Math.min(...marks.map((m) => m.y), 9999)}`);
+    // 只认这条 ID 的标记：别的批注一个都不算
+    const ids = crossId ? await marksOf(crossId) : [];
+    const above = ids.filter((m) => m.y < startViewportY - 60);
+    record("跨页批注的标记不画在拖选起点之上（不跳文档开头/错段）", ids.length > 0 && above.length === 0,
+      `本条标记=${ids.length} 片，起点y=${startViewportY} 最上=${ids.length ? Math.min(...ids.map((m) => m.y)) : "无"}${above.length ? " 越界=" + JSON.stringify(above.slice(0, 2)) : ""}`);
+    // 反向确认：这条批注的标记文字必须落在它自己的 quote 里
+    const recomposed = ids.map((m) => m.t).join("");
+    record("跨页批注的标记文字属于它自己的 quote", Boolean(crossAnn) && stripX(crossAnn.quote).includes(stripX(recomposed).slice(0, 12)),
+      `标记文字前 12=${stripX(recomposed).slice(0, 12)} quote 前 20=${stripX(crossAnn && crossAnn.quote).slice(0, 20)}`);
     await page.shot(`${OUT}/a04-crosspage.png`);
   } else {
-    record("跨页：找到跨页选择目标", false, `tailP1=${Boolean(tailP1)} headP2=${Boolean(headP2)}`);
+    record("跨页：取到跨页选择目标", false, `tailP1=${Boolean(tailP1)} headP2=${Boolean(headP2)}`, "skip");
   }
 
   /* ---------- 3b. 反向用例：起点在正文之外 ----------
@@ -276,7 +317,7 @@ try {
     return { start: { x: sx, y: Math.round(br.top + br.height / 2) },
              end: { x: Math.round(pr.left + 30), y: Math.round(pr.top + 200) } };`);
   const cardsBeforeReverse = await cardCount();
-  if (!outside) { record("反向：能在顶栏找到非按钮的起点", false, "顶栏全是控件"); }
+  if (!outside) record("反向：能在顶栏找到非按钮的起点", false, "顶栏全是控件，无法构造确定性起点", "skip");
   await page.drag(outside.start, outside.end, { steps: 16 });
   const reverseMenu = await page.eval(`return !document.querySelector('#sel-menu').hidden`);
   let reverseQuote = null;
@@ -339,8 +380,8 @@ try {
     if (!a || !b) return { none: true, count: spans.length };
     return { from: a, to: b, joined: spans.slice(0, 3).map(s => s.textContent).join('').slice(0, 40), count: spans.length };`);
   if (!rot || rot.none) {
-    record("旋转页：未能取到落在旋转文字上的拖选点（测试前置条件不足，非产品失败）", true,
-      `spans=${rot && rot.count}；旋转文字层上 caretRangeFromPoint 取不到落在 span 内的点`);
+    record("旋转页：真实拖选（取不到落在旋转文字上的拖选点，产品行为未被验证）", false,
+      `spans=${rot && rot.count}；旋转文字层上 caretRangeFromPoint 取不到落在 span 内的点`, "skip");
   }
   if (rot && !rot.none) {
     await page.drag(rot.from, rot.to, { steps: 14 });
@@ -356,8 +397,8 @@ try {
     const ok = await commitAnnotation("A04-5 旋转页上的批注，虚线应贴在原文字下方。");
     const grew = (await cardCount()) > before;
     if (selDiag.startInDoc === false) {
-      record("旋转页：本次拖选起点落在正文之外（测试前置条件不足，非产品失败）", true,
-        `选区长=${selDiag.len} anchorInDoc=${selDiag.anchorInDoc} startInDoc=${selDiag.startInDoc}`);
+      record("旋转页：真实拖选（本次起点落在正文之外，产品行为未被验证）", false,
+        `选区长=${selDiag.len} anchorInDoc=${selDiag.anchorInDoc} startInDoc=${selDiag.startInDoc}`, "skip");
     } else {
       record("旋转页：可拖选并建批注", ok && grew, `选区长度=${selDiag.len} 卡片 ${before} → ${await cardCount()}`);
     }
@@ -389,23 +430,25 @@ try {
   if (tail) {
     await page.drag(tail.from, tail.to, { steps: 14 });
     await commitAnnotation("A03 这条批注的原句稍后会被整段替换掉。");
+    const replacedId = await annotationIdByBody("A03");
+    const beforeReplace = replacedId ? await annotationById(replacedId) : null;
+    record("A03：被替换的那条批注已建成并记录 ID", Boolean(replacedId),
+      `批注ID=${replacedId ? "有" : "无"} quote 前 30=「${beforeReplace && beforeReplace.quote.slice(0, 30)}」`);
     await sleep(600);
     await copyFile(`${FIX}/A04.b.pdf`, `${VAULT}/${DOC}`); // 那句原文彻底不存在了
     await reopen();
     await page.waitFor(`return document.querySelectorAll('#cards .card').length > 0`, { label: "重开后卡片列表", timeout: 15000 }).catch(() => null);
-    const marks = await marksInfo();
-    const stray = marks.filter((m) => m.t.trim().length > 3 && /Tail paragraph/i.test(m.t));
-    record("A03 原文整段替换后不把旧线画到新文字上", stray.length === 0, stray.length ? JSON.stringify(stray.slice(0, 2)) : `标记数=${marks.length}`);
-
-    const flagged = await page.eval(`
-      const cards = [...document.querySelectorAll('#cards .card')];
-      return cards.map(c => ({ status: c.dataset.status, flags: [...c.querySelectorAll('.c-flag, .c-badge, .c-kind')].map(n => n.textContent.trim()).filter(Boolean),
-                               text: (c.textContent || '').replace(/\\s+/g, ' ').slice(0, 140) }));`);
-    const saysChanged = flagged.some((c) => /锚点失效|需确认位置|待定位|原文已变更|已过期/.test(`${c.text}${c.flags.join("")}`) || c.status === "stale");
-    record("A03 明确提示「原文已变化/待确认」而不是静默当成功", saysChanged, JSON.stringify(flagged.slice(0, 2)));
+    const ownMarks = replacedId ? await marksOf(replacedId) : [];
+    const ownCard = replacedId ? await cardOf(replacedId) : null;
+    // 判据全部按这条 ID：它自己的标记、它自己的卡片，不数全局标记、不看"任意一张卡"的文字
+    record("A03 原文被整段替换后，这条批注不把线画到新文字上", ownMarks.length === 0,
+      ownMarks.length ? JSON.stringify(ownMarks.slice(0, 3)) : `本条标记=0（卡片状态=${ownCard && ownCard.status}）`);
+    const saysChanged = Boolean(ownCard) && (/锚点失效|需确认位置|待定位|原文已变更|已过期/.test(`${ownCard.text}${ownCard.flags.join("")}`) || ownCard.status === "stale");
+    record("A03 这条批注明确提示「原文已变化/待确认」而不是静默当成功", saysChanged, JSON.stringify(ownCard));
     await page.shot(`${OUT}/a03-replaced.png`);
+    const marks = ownMarks;
   } else {
-    record("A03：找到被替换的目标段落", false, "样本里没找到 tail 段落");
+    record("A03：取到被替换的目标段落", false, "样本里没找到 tail 段落", "skip");
   }
 
   record("页面无 JS 异常", errors.length === 0, errors.slice(0, 2).join(" | "));
@@ -418,6 +461,8 @@ try {
   await page.close();
 }
 
-const failed = log.filter((l) => !l.ok);
-console.log(`\n结果：${log.length - failed.length}/${log.length} 通过`);
-process.exit(failed.length ? 1 : 0);
+const pass = log.filter((l) => l.state === "pass").length;
+const fail = log.filter((l) => l.state === "fail").length;
+const skip = log.filter((l) => l.state === "skip").length;
+console.log(`\nPASS ${pass} / FAIL ${fail} / SKIP ${skip}（共 ${log.length} 项）`);
+process.exit(fail ? 1 : 0);
