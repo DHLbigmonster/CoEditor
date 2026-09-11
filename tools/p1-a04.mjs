@@ -259,13 +259,24 @@ try {
      从正文左侧的页边空白按下去、拖进正文，浏览器会把 anchor 留在文档外（这正是我们做「求交集」的原因）。
      这条用例要证明的是：修复之后也不会把「从文档开头到这里」整段当成一次批注。 */
   await focusPage(1);
+  /* 起点必须**确定**在文档之外。前一版从「页面右侧空白」起手，浏览器会把起点吸附到页面首个文字位置，
+     于是选区合法地覆盖了文档开头——那是标准浏览器行为，不是缺陷，但会让这条用例时红时绿。
+     改用顶栏：在栏内找一个真正落在栏本身（而不是按钮）的 x。 */
   const outside = await page.eval(`
+    const bar = document.querySelector('#bar');
+    const br = bar.getBoundingClientRect();
+    let sx = null;
+    for (let x = Math.round(br.left + 10); x < br.right - 10; x += 4) {
+      const el = document.elementFromPoint(x, Math.round(br.top + br.height / 2));
+      if (el === bar) { sx = x; break; }
+    }
+    if (sx === null) return null;
     const pg = document.querySelector('#doc .pdf-page[data-page="1"]');
     const pr = pg.getBoundingClientRect();
-    const d = document.querySelector('#doc').getBoundingClientRect();
-    return { start: { x: Math.round(Math.max(d.right + 6, pr.right + 6)), y: Math.round(pr.top + 120) },
+    return { start: { x: sx, y: Math.round(br.top + br.height / 2) },
              end: { x: Math.round(pr.left + 30), y: Math.round(pr.top + 200) } };`);
   const cardsBeforeReverse = await cardCount();
+  if (!outside) { record("反向：能在顶栏找到非按钮的起点", false, "顶栏全是控件"); }
   await page.drag(outside.start, outside.end, { steps: 16 });
   const reverseMenu = await page.eval(`return !document.querySelector('#sel-menu').hidden`);
   let reverseQuote = null;

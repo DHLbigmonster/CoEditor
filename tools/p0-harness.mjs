@@ -46,6 +46,9 @@ export async function openPage(url, { width = 1440, height = 900 } = {}) {
   // 必须禁缓存：否则改完 app.js 后浏览器仍跑旧脚本，会让「修好了/没修好」的判断完全失真
   await send("Network.enable").catch(() => {});
   await send("Network.setCacheDisabled", { cacheDisabled: true }).catch(() => {});
+  // 首次导航发生在禁缓存生效之前，必须再硬刷一次，否则量到的是旧 app.js / pdf-layer.mjs
+  await send("Page.reload", { ignoreCache: true }).catch(() => {});
+  await sleep(500);
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
 
   // 网络请求留痕：用来断言"组合输入期间不提交""保存失败要显性提示"这类行为

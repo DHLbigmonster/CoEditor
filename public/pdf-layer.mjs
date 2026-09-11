@@ -6,6 +6,18 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
 // 宽度自适应容器（消除横向溢出），cols 支持 1/2/3 列阅读布局。
 // v0.7.5：画布按需绘制（IntersectionObserver）——文本层与结构即时建立（锚定/检索/批注不受影响），
 // 昂贵的 page.render 只画视口附近（±900px）的页面；长文档不再全量渲染卡顿。
+//
+// 缩放策略（2026-09-11 重做，对齐 PDF.js 官方 viewer 的做法）：
+//   mozilla/pdf.js 的 pdf_viewer.css 里，`.pdfViewer` 只持有一个 `--scale-factor`，
+//   `.page` 上算出 `--total-scale-factor`，而 canvas 是 `width:100%; height:100%`
+//   ——缩放时**只改 CSS 尺寸与 scale-factor，不重建 DOM**，位图分辨率随后异步补齐。
+//   我们原来每次缩放都 `container.innerHTML = ""` 全量重建（实测一次捏合清空 414 个节点、
+//   3.3 秒才稳定、期间整片空白），所以手感一卡一卡。
+//   现在分成两步：
+//     rescale() —— 同步改宽度/高度/--total-scale-factor 与 canvas 的 CSS 尺寸（O(页数)，立即有反馈）
+//     sharpen() —— 防抖后用离屏 canvas 按新分辨率重画，画完一次性贴回（旧位图全程可见，不闪白）
+//   文本层位置本来就是百分比（left/top 为 %），字号由 --total-scale-factor 驱动，
+//   所以不重建也不会错位；批注 <mark> 在文本层里，同样跟着一起缩放，不需要重新锚定。
 
 window.renderPdfToContainer = async function renderPdfToContainer(container, url, { cols = 1, maxScale = 1.4, zoom = 1 } = {}) {
   container.innerHTML = "";
@@ -14,15 +26,99 @@ window.renderPdfToContainer = async function renderPdfToContainer(container, url
   return buildPdfPages(container, pdf, cols, maxScale, zoom);
 };
 
-/* 缩放（app.js 在 view.zoom 变化时防抖调用）：zoom=1 = 适合容器宽；
-   >1 时页面按比例放大并产生内部滚动，文档句柄复用不重开。 */
-window.setPdfZoom = async function setPdfZoom(container, zoom) {
-  const state = window.__coeditorPdfDoc;
-  if (!state || state.container !== container) return null;
-  container.innerHTML = ""; // 旧页面先清掉，否则新页面追加在后面、锚点和量测全落在旧 DOM
-  const cols = container.classList.contains("pdf-multi") ? 2 : 1;
-  return buildPdfPages(container, state.pdf, cols, 1.4, zoom);
+/** 当前视图记录：缩放时改它，不重建 DOM */
+let view = null;
+let sharpenTimer = null;
+
+/** 第一步：只改尺寸（同步、便宜）。返回新的 scale。 */
+window.setPdfZoom = function setPdfZoom(container, zoom) {
+  const v = view;
+  if (!v || v.container !== container) return null;
+  const scale = v.fitScale * zoom;
+  v.zoom = zoom;
+  v.scale = scale;
+  v.gen += 1; // 代次：正在跑的位图任务作废，不得回写到新尺寸上
+  for (const rec of v.records) {
+    const vp = rec.page.getViewport({ scale });
+    rec.viewport = vp;
+    rec.wrapper.style.width = `${vp.width}px`;
+    rec.wrapper.style.height = `${vp.height}px`;
+    rec.wrapper.style.setProperty("--total-scale-factor", String(vp.scale));
+    // 旧位图先按 CSS 尺寸拉伸顶上去：立刻有反馈，稍后再换高清
+    rec.canvas.style.width = `${vp.width}px`;
+    rec.canvas.style.height = `${vp.height}px`;
+    rec.sharpScale = null;
+  }
+  scheduleSharpen();
+  return { scale, zoom };
 };
+
+/** 第二步：防抖后按新分辨率重画视口附近的位图 */
+function scheduleSharpen() {
+  clearTimeout(sharpenTimer);
+  sharpenTimer = setTimeout(() => { sharpen().catch(() => {}); }, 180);
+}
+
+async function sharpen() {
+  const v = view;
+  if (!v || !v.scale) return;
+  const gen = v.gen;
+  const scroller = v.container.closest("#viewport");
+  const vr = scroller ? scroller.getBoundingClientRect() : { top: -1e9, bottom: 1e9 };
+  for (const rec of v.records) {
+    if (gen !== v.gen) return; // 又缩放过：这一轮全部作废
+    if (!rec.canvas.isConnected) continue;
+    if (rec.sharpScale === v.scale) continue;
+    const r = rec.wrapper.getBoundingClientRect();
+    if (r.bottom < vr.top - 900 || r.top > vr.bottom + 900) continue; // 不在视口附近，等滚进来再画
+    await renderBitmap(rec, v.scale, gen);
+  }
+}
+
+/** 离屏画好再一次性贴回：避免 canvas 重设尺寸瞬间变白 */
+async function renderBitmap(rec, scale, gen) {
+  const viewport = rec.page.getViewport({ scale });
+  const outputScale = Math.max(1, window.devicePixelRatio || 1);
+  const off = document.createElement("canvas");
+  off.width = Math.max(1, Math.floor(viewport.width * outputScale));
+  off.height = Math.max(1, Math.floor(viewport.height * outputScale));
+  try {
+    await rec.page.render({
+      canvasContext: off.getContext("2d"),
+      viewport,
+      transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
+    }).promise;
+  } catch (error) {
+    if (String(error?.name || "").includes("Cancelled")) return;
+    markPaintError(rec, error);
+    return;
+  }
+  if (gen !== view?.gen || !rec.canvas.isConnected) return; // 过期结果直接丢
+  rec.canvas.width = off.width;
+  rec.canvas.height = off.height;
+  rec.canvas.style.width = `${viewport.width}px`;
+  rec.canvas.style.height = `${viewport.height}px`;
+  rec.canvas.getContext("2d").drawImage(off, 0, 0);
+  rec.canvas.dataset.painted = "1";
+  rec.rec = rec;
+  rec.sharpScale = scale;
+  rec.wrapper.querySelector(".pdf-retry")?.remove();
+  rec.wrapper.classList.remove("pdf-paint-error");
+}
+
+function markPaintError(rec, error) {
+  rec.canvas.dataset.painted = "error";
+  rec.wrapper.classList.add("pdf-paint-error");
+  if (rec.wrapper.querySelector(".pdf-retry")) return;
+  const bar = document.createElement("div");
+  bar.className = "pdf-retry";
+  bar.innerHTML = `<span>本页渲染失败：${String(error && error.message || error).slice(0, 80)}</span>`;
+  const retry = document.createElement("button");
+  retry.textContent = "重试";
+  retry.addEventListener("click", () => { rec.canvas.dataset.painted = ""; renderBitmap(rec, view?.scale || rec.viewport.scale, view?.gen ?? 0); });
+  bar.appendChild(retry);
+  rec.wrapper.appendChild(bar);
+}
 
 async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   const scrollTop = container.closest("#viewport")?.scrollTop || 0;
@@ -52,21 +148,11 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
           const transform = outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0];
           await item.page.render({ canvasContext: context, viewport: item.viewport, transform }).promise;
           item.canvas.dataset.painted = "1"; // 真正画完才算 painted——失败留空不能冒充加载成功
+          if (item.rec) item.rec.sharpScale = item.scale;
           item.wrapper.querySelector(".pdf-retry")?.remove();
           item.wrapper.classList.remove("pdf-paint-error");
         } catch (error) {
-          item.canvas.dataset.painted = "error";
-          if (item.wrapper) {
-            item.wrapper.classList.add("pdf-paint-error");
-            const bar = document.createElement("div");
-            bar.className = "pdf-retry";
-            bar.innerHTML = `<span>本页渲染失败：${String(error && error.message || error).slice(0, 80)}</span>`;
-            const retry = document.createElement("button");
-            retry.textContent = "重试";
-            retry.addEventListener("click", () => { item.canvas.dataset.painted = ""; paint(item); });
-            bar.appendChild(retry);
-            item.wrapper.appendChild(bar);
-          }
+          if (item.rec) markPaintError(item.rec, error);
         }
       });
     return paintChain;
@@ -74,12 +160,17 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
 
   let text = "";
   const textJobs = [];
+  const records = [];
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const viewport = page.getViewport({ scale });
     const wrapper = document.createElement("div");
     wrapper.className = "pdf-page";
     wrapper.dataset.page = String(pageNumber);
+    // PDF.js TextLayer uses these variables for both its bounds and glyph sizes.
+    wrapper.style.setProperty("--total-scale-factor", String(viewport.scale));
+    wrapper.style.setProperty("--scale-round-x", "1px");
+    wrapper.style.setProperty("--scale-round-y", "1px");
     wrapper.style.width = `${viewport.width}px`;
     wrapper.style.height = `${viewport.height}px`;
     wrapper.style.marginBottom = `${gap}px`;
@@ -105,6 +196,9 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
 
     container.appendChild(wrapper);
 
+    const rec = { pageNumber, page, wrapper, canvas, layer, viewport, sharpScale: null, renderTask: null };
+    records.push(rec);
+
     // 文本提取（批注锚定、全文提取、检索都依赖 text 字符串）与文字层渲染解耦
     const content = await page.getTextContent();
     for (const item of content.items) {
@@ -119,7 +213,7 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
 
     // 首屏两页立即绘制，其余进入按需队列（item 必须带 wrapper：失败重试 UI 要挂上去，
     // 而且任何一项的异常都不能污染 paintChain 导致后续页永不绘制）
-    const item = { page, canvas, viewport, wrapper };
+    const item = { page, canvas, viewport, wrapper, rec, scale };
     if (pageNumber <= 2) {
       paint(item);
     } else {
@@ -127,6 +221,8 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
     }
   }
   await Promise.all(textJobs);
+
+  view = { container, pdf, cols, maxScale, fitScale, zoom, scale, records, gen: 0 };
 
   // 扫描件（无文字层）：明确说明能力边界——区域批注可用，不承诺不存在的 OCR
   if (!text.trim() && pdf.numPages > 0 && !container.querySelector(".pdf-scan-hint")) {
@@ -160,7 +256,7 @@ async function buildPdfPages(container, pdf, cols, maxScale, zoom = 1) {
   }
 
   return { text, pages: pdf.numPages, scale, cols };
-};
+}
 
 /* ---------------- 单页渲染（PPTX 幻灯片视图用） ----------------
    缩略图轨一次要画十几页，每页都 getDocument 会重复下载/解析同一份 PDF。
@@ -202,8 +298,8 @@ window.renderPdfPage = async function renderPdfPage(url, pageNumber, target, { w
   return { width: viewport.width, height: viewport.height };
 };
 
-// 列布局切换：重渲染当前 PDF（app.js 调用）
+// 列布局切换：重渲染当前 PDF（app.js 调用）。列数变化要重新排版，这条走完整重建。
 window.rerenderPdfWithCols = async function rerenderPdfWithCols(container, url, cols) {
-  const zoom = window.__coeditorPdfDoc && window.__coeditorPdfDoc.container === container ? (window.__coeditorPdfZoom || 1) : 1;
+  const zoom = view && view.container === container ? (view.zoom || 1) : 1;
   return renderPdfToContainer(container, url, { cols, maxScale: 1.4, zoom });
 };

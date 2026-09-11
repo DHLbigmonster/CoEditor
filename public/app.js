@@ -173,10 +173,7 @@ function clampView() {
   view.panY = Math.min(slack, Math.max(rect.height - contentH * view.zoom - slack, view.panY));
 }
 
-let pdfZoomTimer = null;
 let pdfZoomApplied = 1;
-let pdfZoomAnchor = null; // 光标下的文档锚点：新尺寸渲染完再恢复，避免「按旧尺寸夹紧」造成的漂移
-let pdfZoomGen = 0; // 渲染代次：旧任务不得覆盖新尺寸/新锚点
 
 /** 记住光标位置对应的「页码 + 页内归一化点 + 屏幕偏移」，供重渲染后还原 */
 function captureZoomAnchor(clientX, clientY) {
@@ -211,26 +208,37 @@ function restoreZoomAnchor(anchor) {
   viewport.scrollTop += pointY - (vr.top + anchor.dy);
 }
 
-function schedulePdfZoom() {
-  // PDF 是固定像素内容：缩放要真正改变画布尺寸并产生内部滚动（像浏览器 PDF 查看器），
-  // 而不是被 flex 压回容器宽。防抖重渲染，复用已打开的文档句柄。
+/** 缩放：同步改尺寸，不重建 DOM。
+    位图按新分辨率重画由 pdf-layer 自己防抖（离屏画好再贴回，旧位图全程可见）。
+    因为文本层没有被重建，批注 <mark> 跟着百分比一起缩放，**不需要重新锚定**。 */
+function applyPdfScale() {
   if (state.mode !== "pdf" || state.workspaceMode !== "read") return;
-  clearTimeout(pdfZoomTimer);
-  const gen = ++pdfZoomGen;
-  pdfZoomTimer = setTimeout(async () => {
-    if (typeof window.setPdfZoom !== "function") return;
+  if (typeof window.setPdfZoom !== "function") return;
+  try {
+    window.setPdfZoom($("doc"), view.zoom);
+    pdfZoomApplied = view.zoom;
+    renderRegions();
+    drawLines();
+  } catch { /* 渲染失败保持现状，下次缩放再试 */ }
+}
+
+/** 容器宽度 / DPR 变了：fitScale 必须重算，这条只能完整重建（少见，重建后重新锚定） */
+let pdfRebuildTimer = null;
+function schedulePdfRebuild() {
+  if (state.mode !== "pdf" || state.workspaceMode !== "read") return;
+  clearTimeout(pdfRebuildTimer);
+  pdfRebuildTimer = setTimeout(async () => {
+    if (typeof window.rerenderPdfWithCols !== "function") return;
+    const epoch = docEpoch;
     try {
-      await window.setPdfZoom($("doc"), view.zoom);
-      if (gen !== pdfZoomGen) return; // 期间又缩放过：旧任务直接作废，不覆盖新状态
+      await window.rerenderPdfWithCols($("doc"), `/api/raw?p=${encodeURIComponent(state.path)}`, state.pdfCols || 1);
+      if (epoch !== docEpoch) return;
       pdfZoomApplied = view.zoom;
       await anchorAll();
-      if (gen !== pdfZoomGen) return;
       renderRegions();
       drawLines();
-      restoreZoomAnchor(pdfZoomAnchor);
-      pdfZoomAnchor = null;
-    } catch { /* 渲染失败保持现状，下次缩放再试 */ }
-  }, 320);
+    } catch { /* 失败保持现状 */ }
+  }, 260);
 }
 
 function applyTransform() {
@@ -241,7 +249,7 @@ function applyTransform() {
       // PDF：CSS zoom 只会让画布在 flex 里被压缩（永远「没有变化」的假放大），
       // 缩放交给 pdf-layer 真正重渲染
       $("page").style.zoom = "";
-      schedulePdfZoom();
+      applyPdfScale();
     } else {
       $("page").style.zoom = String(view.zoom); // 流式文档：放大 = 加大字号，自适应可用宽
     }
@@ -304,10 +312,11 @@ function zoomAt(factor, clientX, clientY) {
     if (next === old) return;
     view.zoom = next;
     if (state.mode === "pdf" && state.workspaceMode === "read") {
-      // PDF 的尺寸变化是**异步**的（防抖后重建页面）。此刻按旧尺寸改 scrollTop 会被夹紧，
-      // 等新尺寸渲染完再恢复又早已偏了——所以这里只记锚点，滚动交给 restoreZoomAnchor。
-      pdfZoomAnchor = captureZoomAnchor(clientX, clientY) || pdfZoomAnchor;
+      // 先在旧几何下记锚点 → 同步改尺寸 → 再按新几何把同一点拨回同一屏幕位置。
+      // 现在尺寸是同步变的，所以整个手势期间手指下的那个点都钉得住，不会等 3 秒才归位。
+      const anchor = captureZoomAnchor(clientX, clientY);
       applyTransform();
+      restoreZoomAnchor(anchor);
       return;
     }
     const ratio = next / old;
@@ -4349,7 +4358,7 @@ window.addEventListener("resize", () => {
   clearTimeout(railFitTimer);
   railFitTimer = setTimeout(() => {
     if (isCanvasMode()) return;
-    if (state.mode === "pdf") { schedulePdfZoom(); return; } // 容器宽/DPR 变化：PDF 按新条件重渲染（不拉伸旧位图）
+    if (state.mode === "pdf") { schedulePdfRebuild(); return; } // 容器宽/DPR 变化：fitScale 要重算，只能完整重建
     updatePaperWidth(); // 流式文档 100% 恒适配可用宽；zoom 因子保持
   }, 200);
 });
@@ -4357,7 +4366,7 @@ window.addEventListener("resize", () => {
 function watchDprChange() {
   const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
   mq.addEventListener("change", () => {
-    if (state.mode === "pdf" && !isCanvasMode()) schedulePdfZoom();
+    if (state.mode === "pdf" && !isCanvasMode()) schedulePdfRebuild();
     watchDprChange();
   }, { once: true });
 }
