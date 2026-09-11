@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.6.0（2026-09-11）· 首个公开测试版
+
+面向「下载就能用」的整理，以及三处阻塞修复。
+
+**发布整理**
+- 运行时依赖内置化：DOCX/PPTX 文字模式所需的 jszip 随仓库带走（\`vendor/jszip.min.cjs\`，MIT/GPL-3.0 双许可，原许可头保留），
+  运行时**不再需要 npm install**；jszip 与 ws 仅留在 devDependencies 供 \`tools/\` 下的验收脚本使用。
+- 补齐此前未入库的运行时文件（\`lib/office-text.mjs\`、\`lib/xml.mjs\`、\`lib/zip.mjs\`、\`public/journal.css\`）。
+- package.json 的 \`files\` 补上 \`vendor/\`；版本统一到 1.6.0（此前 README 停在 1.3.2、package 为 1.5.2）。
+- 干净目录验收：\`git archive\` 导出后**不带 node_modules** 启动，逐项验证（见 docs/RELEASE-1.6.0.md）。
+
+**体验**
+- 批注输入框改为日常语言：「希望这里怎么改？」（原为「按批次编号，成为 Agent 的约束」）。
+- 左栏底部不再显示 \`/api/constraints\` 端点，改为「连接 Agent」入口：
+  未接入 → 「连接 Agent」；已复制接入配置 → 「等待 Agent 读取」；**确实有 Agent 读过** 才显示「已连接 · 最近一次读取 …」。
+  判据是读取事实（\`GET /api/constraints\`），不是"配置文件写没写"。
+
+**修复（P0/B01–B03）**
+- B01 原文看不到批注：保存的 quote 含换行、重建索引无分隔符导致 \`indexOf\` = -1，一个标记都不画。
+  改为原文与匹配文本分离（规范化 + 偏移映射），并新增页级精确恢复（pageIndex/textOffset/pageFp）。
+- B02 右栏点击：选中挂在 mousedown 且会重建列表，pointerdown 到 click 之间卡片被换掉（20 次错 6 次）；
+  拖选卡片文字后补发的 click 会把正文滚回顶部。改为 click 阶段处理 + 意图判定 + 点右栏卡片不重建列表。
+- B03 触控板缩放：每事件固定 ×1.1、忽略幅度与 deltaMode；PDF 在异步重渲染前改 scrollTop 被旧尺寸夹紧。
+  改为 deltaMode 归一化 + rAF 合并 + 连续指数映射 + 锚点式恢复。
+
+**修复（P1）**
+- 缩放平滑：从「每次缩放整块重建 DOM」（一次捏合并清空 414 节点、3.3s 才稳定）改为
+  「同步改 CSS 尺寸 + 位图异步锐化」（对齐 PDF.js viewer 的 --scale-factor 做法）。
+- 远页高清：位图绘制收敛到唯一入口，IntersectionObserver 进视口按**当前倍率**画；
+  每条记录持有自己的 renderTask（先 cancel 旧任务）、画完再验代次丢弃过期结果；离屏画好再贴回，不闪白。
+- 适合宽度：PDF 模式下 \`--paper-w\` 从不更新、纸张被 820px 钉死，窄窗口阅读容器内部一直有横向溢出；
+  改为按阅读容器可用宽计算。分隔条热区只往左伸（原来向右多 3px 顶出 body 的 scrollWidth）。
+- 窄屏 <1100px 自动收起文件树；点右栏卡片不再重建列表。
+
 ## v1.5.2（2026-09-07）· 右栏收敛、验收纠偏、DOCX 编辑验证（本地提交，未推送待验收）
 
 按 2026-09-07《侧栏收敛、验收纠偏与 DOCX 编辑验证》命令执行。
@@ -12,7 +46,7 @@
 - 无横滚：列表容器与静态头部分离、min-width:0、长引用/URL 换行（实测 scrollWidth ≤ clientWidth）
 - 恢复被 S2 误删的「保存后自动切组」逻辑
 
-**§3 运行一致性**：正文「第 N 轮/批次」字样全部移除（版本条目改「版本」标签、抽屉分组改「当前意见/更早的意见」；内部 round 数据保留）。4400 仍为 v1.4.0 旧后端（2026-09-06 22:41 启动，工作区=/Users/chaos/Desktop/简历），重启需用户许可。
+**§3 运行一致性**：正文「第 N 轮/批次」字样全部移除（版本条目改「版本」标签、抽屉分组改「当前意见/更早的意见」；内部 round 数据保留）。4400 仍为 v1.4.0 旧后端（2026-09-06 22:41 启动，工作区=（用户的私有目录）），重启需用户许可。
 
 **§0 验收纠偏（全部补齐，结果在 tools/acceptance/*.json）**：
 - v12：真实对保留 ID 调 resolve → `retained-until-user-cancels` 拒绝 + 回读仍 active

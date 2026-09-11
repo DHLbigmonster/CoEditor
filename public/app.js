@@ -3959,6 +3959,71 @@ $("btn-lines").addEventListener("click", (event) => {
   event.currentTarget.textContent = on ? "连接线：显示" : "连接线：自动";
   drawLines();
 });
+/* ---------------- Agent 接入状态 ----------------
+   普通用户不该看到 /api/constraints。这里只回答一个问题：有没有 Agent 真的读过我的批注。
+   「已连接」必须有一次真实读取作证据 —— 配置文件写没写、向导跑没跑完，都不作为判据。 */
+const AGENT_MCP_SNIPPET = JSON.stringify({
+  mcpServers: { coeditor: { command: "node", args: ["<CoEditor 目录>/mcp-stdio.mjs"] } },
+}, null, 2);
+
+function agentRelativeTime(ts) {
+  if (!ts) return "";
+  const diff = Date.now() - Number(ts);
+  if (diff < 60000) return "刚刚";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+  const d = new Date(Number(ts));
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+async function refreshAgentStatus() {
+  const chip = $("btn-agent");
+  const label = $("agent-label");
+  const status = $("agent-status");
+  const snip = $("agent-snippet");
+  if (!chip || !label) return;
+  let data = null;
+  try { data = await fetch("/api/agent-status").then((r) => r.json()); } catch { /* 服务不可达就当作未知 */ }
+  const read = Boolean(data && data.count > 0);
+  // armed = 用户已经看过/复制过接入配置。只影响文案，不冒充「已连接」。
+  let armed = false;
+  try { armed = localStorage.getItem("coeditor.agentArmed") === "1"; } catch { /* 隐私模式 */ }
+  chip.dataset.state = read ? "connected" : armed ? "waiting" : "idle";
+  label.textContent = read ? "已连接" : armed ? "等待 Agent 读取" : "连接 Agent";
+  if (status) {
+    status.textContent = read
+      ? `已连接 · 最近一次读取 ${agentRelativeTime(data.lastAt)}`
+      : armed
+        ? "配置已就绪。Agent 第一次读取批注后，这里会自动变成「已连接」。"
+        : "还没有 Agent 读取过这份工作区。";
+  }
+  if (snip) snip.textContent = AGENT_MCP_SNIPPET;
+}
+
+$("btn-agent")?.addEventListener("click", () => {
+  const pop = $("agent-pop");
+  const willOpen = pop.hidden;
+  pop.hidden = !willOpen;
+  $("btn-agent").setAttribute("aria-expanded", String(willOpen));
+  if (willOpen) refreshAgentStatus();
+});
+$("agent-close")?.addEventListener("click", () => {
+  $("agent-pop").hidden = true;
+  $("btn-agent").setAttribute("aria-expanded", "false");
+});
+$("agent-check")?.addEventListener("click", () => refreshAgentStatus());
+$("agent-copy")?.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(AGENT_MCP_SNIPPET);
+    try { localStorage.setItem("coeditor.agentArmed", "1"); } catch { /* 忽略 */ }
+    toast("接入配置已复制，粘到你的 Agent 的 MCP 配置里即可");
+    refreshAgentStatus();
+  } catch {
+    toast("复制失败，可以手动选中上面的配置");
+  }
+});
+refreshAgentStatus();
+setInterval(refreshAgentStatus, 15000);
+
 $("rail-toggle").addEventListener("click", () => {
   document.body.classList.toggle("rail-hidden");
   railAutoCollapsed = false; // 用户自己动过，就不再替他自动展开

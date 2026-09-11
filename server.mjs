@@ -19,6 +19,9 @@ const QUEUE_WAIT_TIMEOUT_MS = 15000;
 /* PPTX 转换后台任务：key = 绝对文件路径。转换可能几十秒，不能顶在一次 HTTP 请求里
    （server.requestTimeout 只有 30s），也不能进全局队列（会把其它 API 一起堵住）。 */
 const PPTX_JOBS = new Map();
+
+// Agent 读取留痕：只用于 UI 显示「已连接 / 等待读取」，不参与任何业务逻辑
+const AGENT_READS = { count: 0, lastAt: 0 };
 async function queueRequest(timeoutMs = QUEUE_WAIT_TIMEOUT_MS) {
  const previous = requestQueue; let release;
  requestQueue = new Promise(resolve => { release = resolve; });
@@ -979,7 +982,21 @@ const requestHandler = async (req, res) => {
       }
     }
 
+    /* Agent 接入状态：UI 只说「有没有 Agent 真的读过」，不替用户假装已连接。
+       判据是「这个接口被读过」这个事实本身，而不是「配置文件写没写」。 */
+    if (url.pathname === "/api/agent-status") {
+      return send(200, JSON.stringify({
+        count: AGENT_READS.count,
+        lastAt: AGENT_READS.lastAt || null,
+        lastAtISO: AGENT_READS.lastAt ? new Date(AGENT_READS.lastAt).toISOString() : null,
+        sidecar: ".marginalia/annotations.json",
+      }));
+    }
+
     if (url.pathname.startsWith("/api/constraints")) {
+      // 被读一次就记一次：这是「Agent 真的接上了」唯一的客观证据
+      AGENT_READS.count += 1;
+      AGENT_READS.lastAt = Date.now();
       const data = await readSidecar();
       const list = (data.docs[url.searchParams.get("p")] || []).filter((item) => item.status === "active");
       return send(200, JSON.stringify({

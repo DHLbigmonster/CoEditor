@@ -10,8 +10,8 @@
 
 | 项 | 值 |
 |---|---|
-| 真身路径 | `/Users/chaos/Desktop/coeditor/marginalia` |
-| 会话软链 | `/Users/chaos/WorkBuddy/2026-09-03-22-03-32`（指向同一份文件） |
+| 真身路径 | `（本仓库）/marginalia` |
+| 会话软链 | `（本仓库的会话软链）`（指向同一份文件） |
 | HEAD | `1301e46` |
 | package 版本 | `coeditor@1.5.2`（README 标题仍写 v1.3.2 —— 文案落后，待统一） |
 | Node | `v22.22.2` |
@@ -31,7 +31,7 @@
 统计：`git diff` 9 文件 +748/-40；`git diff --cached` 4 文件 +12/-822。
 
 **备份**：
-- 工作树快照 `/Users/chaos/Desktop/coeditor/backups/marginalia-wip-20260911-105339.tgz`（7.3MB，排除 node_modules/.git/pptx-cache）
+- 工作树快照 `（本仓库）/backups/marginalia-wip-20260911-105339.tgz`（7.3MB，排除 node_modules/.git/pptx-cache）
 - git 工作树对象 `38f24cc28f8a67a20790b94901022522fbaf5fa4`（`git stash create` 产出，未改动索引/工作树）
 
 ---
@@ -40,10 +40,10 @@
 
 | 实例 | PID | 端口 | vault | 状态 |
 |---|---|---|---|---|
-| 生产（用户正在用） | `39985` | `4478` | `/Users/chaos/Desktop/简历/林木求职` | 活跃，`/` 200、`/api/tree` 正常 |
+| 生产（用户正在用） | `39985` | `4478` | `（用户的私有工作区，不在公库记录）` | 活跃，`/` 200、`/api/tree` 正常 |
 | 残留测试 | — | `4477` | — | 返回 502，非本轮所需，**不主动清理** |
 
-- 生产实例 vault 是**他人真实简历目录**，只读对待，不写入、不删改。
+- 生产实例 vault 是**用户的私有工作区**，只读对待，不写入、不删改。
 - 本轮测试一律另起端口与独立 vault，不得复用 4478。
 
 ## 3. 资源版本
@@ -74,7 +74,7 @@
 
 - PDF：`研究设计-技术附录.pdf`、`研究设计-英文摘要.pdf`
 - DOCX：`项目简报-山月斋数字化试点.docx`
-- PPTX：`周敏-店长.pptx`（**第三方求职材料，见 §6 红线**）
+- PPTX：`第三方样本.pptx`（**第三方求职材料，见 §6 红线**）
 - MD/HTML/图片：若干
 - `.canvas` 文件：3 个（空间模式产物）
 
@@ -84,8 +84,8 @@
 
 ## 6. 红线
 
-- `sample/周敏-店长.pptx` 含第三方个人信息；仓库为 **public**（DHLbigmonster/CoEditor）。不得再复制进仓库、不得提交、不得用于公开演示。
-- 生产 vault `/Users/chaos/Desktop/简历/林木求职` 同上，只读。
+- `sample/第三方样本.pptx` 含第三方个人信息；仓库为 **public**（DHLbigmonster/CoEditor）。不得再复制进仓库、不得提交、不得用于公开演示。
+- 生产 vault `（用户的私有工作区，不在公库记录）` 同上，只读。
 - 测试只杀自己启动的进程；4478/39985 不得触碰。
 
 ## 7. 与执行规格的差异记录

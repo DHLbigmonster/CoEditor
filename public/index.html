@@ -8,6 +8,7 @@
 <link rel="alternate icon" type="image/png" href="/favicon.png" />
 <link rel="stylesheet" href="/style.css" />
 <link rel="stylesheet" href="/review.css" />
+<link rel="stylesheet" href="/journal.css" />
 <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css" />
 <link rel="stylesheet" href="/vendor/codemirror/addon/dialog/dialog.css" />
 </head>
@@ -15,7 +16,6 @@
 <aside id="rail">
   <div class="rail-top">
     <div class="brand">
-      <span class="mark"></span>
       <span>CoEditor</span>
     </div>
     <div class="vault" id="vault"></div>
@@ -23,14 +23,27 @@
     <button id="btn-vault" class="ghost" title="像 VSCode 一样打开另一个本地文件夹">打开文件夹…</button>
   </div>
   <div class="rail-scroll">
-    <div class="rail-label"><span>文档</span><button id="btn-new-file" title="新建文档（Markdown / TXT / HTML）">＋</button></div>
+    <div class="rail-label"><span>我的文档</span><button id="btn-new-file" title="新建文档（Markdown / TXT / HTML）">＋</button></div>
     <input id="file-search" type="search" placeholder="查找文件…" aria-label="查找文件" />
     <div id="tree" class="tree"></div>
   </div>
   <div class="rail-foot">
     <div class="stat"><span id="stat-count">0</span> 条批注 · <span id="stat-active">0</span> 当前</div>
     <div id="sync-status" role="status" aria-live="polite">本地工作区</div>
-    <div class="hint">Agent 读取：<code id="api-hint">/api/constraints</code></div>
+    <!-- 普通用户不该看到 HTTP 端点。这里只表达「Agent 接没接上」，配置细节收进弹层。 -->
+    <button id="btn-agent" class="agent-chip" type="button" aria-expanded="false" aria-controls="agent-pop">
+      <span class="agent-dot" aria-hidden="true"></span><span id="agent-label">连接 Agent</span>
+    </button>
+    <div id="agent-pop" class="agent-pop" hidden>
+      <div class="ap-head"><b>连接 Agent</b><button id="agent-close" class="icon" type="button" title="关闭">✕</button></div>
+      <p id="agent-status" class="ap-status">还没有 Agent 读取过这份工作区</p>
+      <p class="ap-note">批注保存在本机 <code>.marginalia/annotations.json</code>，不经过任何服务器。已接入的 Agent 通过 MCP 读取，跨会话仍然有效。</p>
+      <pre id="agent-snippet" class="ap-code"></pre>
+      <div class="ap-actions">
+        <button id="agent-copy" class="chip" type="button">复制接入配置</button>
+        <button id="agent-check" class="chip" type="button">重新检测</button>
+      </div>
+    </div>
   </div>
 </aside>
 <div id="rail-resizer" role="separator" aria-orientation="vertical" aria-label="调整侧栏宽度" title="拖动调整侧栏宽度"></div>
@@ -45,7 +58,7 @@
         <button data-workspace-mode="edit">编辑</button>
       </span>
       <span id="save-badge" role="status" title="文档保存在本机目录，CoEditor 不上传任何内容"><i>✓</i>已保存到本地</span>
-      <button id="btn-cards" class="chip" aria-pressed="false" title="打开/收起反馈面板（窄屏时以抽屉呈现）">反馈</button>
+      <button id="btn-cards" class="chip" aria-pressed="false" title="打开/收起批注面板（窄屏时以抽屉呈现）">批注</button>
       <button id="btn-drawer" class="chip" hidden aria-hidden="true" tabindex="-1">批注</button> <!-- U04：入口已并入「反馈」；保留元素供旧脚本兼容 -->
       <button id="btn-export" class="chip" hidden>导出标注图</button>
       <button id="btn-out" class="icon" title="缩小">−</button>
@@ -110,13 +123,13 @@
     </div>
     <div id="toast"></div>
     <div id="empty">
-      <p class="e-slogan">让好想法，在每一轮修改里留下来。</p>
+      <p class="e-slogan">让每一次修改，都保留你的判断。</p>
       <div class="e-steps">
         <div class="e-step"><b>1</b><span>从左侧打开一份文档，正常阅读</span></div>
-        <div class="e-step"><b>2</b><span>选中文字写下想法，或点「保留」锁住不能动的内容</span></div>
-        <div class="e-step"><b>3</b><span>把修改交给 AI——批注会自动追踪处理结果</span></div>
+        <div class="e-step"><b>2</b><span>选中文字留下批注，或标记需要保留的内容</span></div>
+        <div class="e-step"><b>3</b><span>让已接入的 Agent 读取意见，继续改稿</span></div>
       </div>
-      <p class="e-hint">原文永远保留 · 批注按批次编号 · 按一下 <b>?</b> 看全部快捷键</p>
+      <p class="e-hint">批注保存在本地 · 按 <b>?</b> 查看快捷键</p>
     </div>
     <div id="shortcut-help" hidden>
       <div class="sh-card">
@@ -141,7 +154,7 @@
   <div id="cards-resizer" title="拖拽调整反馈栏宽度"></div>
   <aside id="cards" aria-label="文档反馈">
     <div class="cards-head">
-      <strong>反馈</strong>
+      <strong>批注</strong>
       <button id="cards-collapse" class="icon" title="收起反馈栏">✕</button>
     </div>
     <div id="cards-body"></div>
@@ -180,7 +193,7 @@
 
 <div id="composer" hidden>
   <div class="c-quote" id="composer-quote"></div>
-  <textarea id="composer-input" rows="3" placeholder="写下这条批注 —— 它会按批次编号，成为 Agent 的约束"></textarea>
+  <textarea id="composer-input" rows="3" placeholder="希望这里怎么改？"></textarea>
   <div class="c-foot">
     <span class="c-tip">⌘/Ctrl + Enter 保存</span>
     <div>

@@ -2,7 +2,7 @@
 # 生成 A04 专用合成 PDF：重复句 / 跨页长段 / 特殊空白（全角空格、不换行空格）/ 旋转页
 # 全部为合成资料，不含任何真人信息。
 #
-# 用法: /Users/chaos/.workbuddy/binaries/python/envs/default/bin/python tools/make-a04-fixtures.py <输出路径>
+# 用法: python3 tools/make-a04-fixtures.py <输出路径>
 import sys
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle

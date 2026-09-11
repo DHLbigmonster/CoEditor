@@ -86,6 +86,42 @@ body.rail-hidden #rail { margin-left: calc(-1 * var(--rail-width, 224px)); }
 .rail-foot .stat { color: var(--ink-dim); }
 .rail-foot code { display: block; margin-top: 6px; font-size: 10px; color: var(--ink-faint); }
 
+/* ---------- Agent 接入状态（左栏底部）----------
+   只表达「有没有 Agent 真的读过」，端点与配置细节收进弹层。 */
+.rail-foot { position: relative; }
+.agent-chip {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+  padding: 4px 10px 4px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid #dedfd5; background: #fffefa; color: #5b6156;
+  font: inherit; font-size: 11px; line-height: 1.6;
+}
+.agent-chip:hover { background: #fff; border-color: #cfd1c6; }
+.agent-dot { width: 7px; height: 7px; border-radius: 50%; background: #c6c8bd; flex: none; }
+.agent-chip[data-state="waiting"] .agent-dot { background: #d8a13a; }
+.agent-chip[data-state="connected"] .agent-dot { background: #4d8a5f; }
+
+.agent-pop {
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% + 6px); z-index: 60;
+  padding: 12px 12px 10px; border-radius: 10px;
+  background: #fffefa; border: 1px solid #dedfd5; box-shadow: 0 14px 34px rgba(30, 26, 18, .14);
+  font-size: 11px; line-height: 1.65; color: #4a4f45; text-align: left;
+}
+.agent-pop .ap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.agent-pop .ap-head b { font-size: 12px; color: #33362f; }
+.agent-pop .ap-status { margin: 0 0 6px; color: #3d4038; }
+.agent-pop .ap-note { margin: 0 0 8px; color: #6b7066; }
+.agent-pop .ap-note code { display: inline; margin: 0; font-size: 10px; }
+.agent-pop .ap-code {
+  margin: 0 0 8px; padding: 8px 9px; border-radius: 7px; background: #f4f3ec; color: #4a4f45;
+  font-size: 10px; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+  max-height: 132px; overflow: auto;
+}
+.agent-pop .ap-actions { display: flex; gap: 6px; }
+body.paper-dark .agent-pop { background: #221f19; border-color: #3a352c; color: #cfcabd; }
+body.paper-dark .agent-pop .ap-head b, body.paper-dark .agent-pop .ap-status { color: #e6e1d6; }
+body.paper-dark .agent-pop .ap-code { background: #2b271f; color: #cfcabd; }
+body.paper-dark .agent-chip { background: #221f19; border-color: #3a352c; color: #cfcabd; }
+
 /* ---------- 顶栏：纯玻璃，无底边线 ---------- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 

@@ -1,7 +1,7 @@
 {
   "name": "coeditor",
-  "version": "1.5.2",
-  "description": "本地文档阅读、编辑与批注层：批次编号、内容保留和 Agent 修改约束",
+  "version": "1.6.0",
+  "description": "本地优先的文档阅读、编辑与批注层：把给 AI 的修改意见长期留在原文上",
   "type": "module",
   "bin": {
     "coeditor": "./cli.mjs"
@@ -21,10 +21,12 @@
     "lib/",
     "public/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "vendor/"
   ],
+  "dependencies": {},
   "devDependencies": {
-    "jszip": "^3.10.1",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "jszip": "^3.10.1"
   }
 }

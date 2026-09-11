@@ -5,3 +5,10 @@
 node_modules/
 **/.marginalia/*.bak*
 **/.marginalia/*.prev
+
+# 含第三方个人信息的文件，禁止入库（本仓库是 public）
+sample/*.pptx
+# PPTX 预览缓存（含渲染出的 PDF 副本）
+**/.marginalia/pptx-cache/
+# 存储锁（临时文件）
+**/.marginalia/*.lock
