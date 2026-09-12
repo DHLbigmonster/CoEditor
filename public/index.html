@@ -89,7 +89,21 @@
   <div id="work-row">
   <div id="viewport">
     <div id="world">
-      <div id="page"><article id="doc"></article></div>
+      <div id="page">
+        <article id="doc"></article>
+        <!-- 空状态放在纸张里，而不是挂在 #viewport 上：
+             纸张宽屏靠左、窄屏居中，挂在 viewport 上的话居中盒子跟纸张不是一个，
+             窗口一宽内容就伸到纸张外面（实测多出 165px）。 -->
+        <div id="empty">
+          <p class="e-slogan">让每一次修改，都保留你的判断。</p>
+          <div class="e-steps">
+            <div class="e-step"><b>1</b><span>从左侧打开一份文档，正常阅读</span></div>
+            <div class="e-step"><b>2</b><span>选中文字留下批注，或标记需要保留的内容</span></div>
+            <div class="e-step"><b>3</b><span>让已接入的 Agent 读取意见，继续改稿</span></div>
+          </div>
+          <p class="e-hint">批注保存在本地 · 按 <b>?</b> 查看快捷键</p>
+        </div>
+      </div>
       <svg id="lines" xmlns="http://www.w3.org/2000/svg"></svg>
       <svg id="arrows" xmlns="http://www.w3.org/2000/svg"></svg>
       <div id="images-layer"></div>
@@ -122,15 +136,6 @@
       <div class="ale-hint">Enter 确认 · Esc 留空</div>
     </div>
     <div id="toast"></div>
-    <div id="empty">
-      <p class="e-slogan">让每一次修改，都保留你的判断。</p>
-      <div class="e-steps">
-        <div class="e-step"><b>1</b><span>从左侧打开一份文档，正常阅读</span></div>
-        <div class="e-step"><b>2</b><span>选中文字留下批注，或标记需要保留的内容</span></div>
-        <div class="e-step"><b>3</b><span>让已接入的 Agent 读取意见，继续改稿</span></div>
-      </div>
-      <p class="e-hint">批注保存在本地 · 按 <b>?</b> 查看快捷键</p>
-    </div>
     <div id="shortcut-help" hidden>
       <div class="sh-card">
         <div class="sh-head">快捷键 <button id="sh-close" class="icon">✕</button></div>

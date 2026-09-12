@@ -663,6 +663,13 @@ body[data-tool="region"] #doc { cursor: crosshair; }
   color: var(--ink-faint); font-size: 13px; pointer-events: none;
 }
 
+/* 空状态现在挂在 #page 里（见 index.html），所以 inset:0 就是"纸张那一块"，
+   宽屏靠左、窄屏居中都会自动跟着纸张走 —— 不再需要任何偏移补偿。 */
+#empty { inset: 0; }
+/* 步骤条在纸张宽度里等比收缩，不撑破纸张内容区（三块 250px + 间距 = 774 > 752） */
+#empty .e-steps { max-width: 100%; }
+#empty .e-step { flex: 1 1 200px; min-width: 0; }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(236, 231, 221, .1); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(236, 231, 221, .18); }
