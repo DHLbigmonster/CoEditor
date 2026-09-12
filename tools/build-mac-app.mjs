@@ -2,15 +2,16 @@
 //
 //   node tools/build-mac-app.mjs                 # 用当前 node 作为内置运行时
 //   node tools/build-mac-app.mjs --node /path/to/node
+//   node tools/build-mac-app.mjs --dmg           # 额外产出可分发的 dmg（拖进应用程序即装）
 //   node tools/build-mac-app.mjs --zip           # 额外产出可分发的 zip
 //
-// 产出：dist/CoEditor.app （双击即用）与可选 dist/CoEditor-<版本>.zip
+// 产出：dist/CoEditor.app（双击即用）、可选 dist/CoEditor-<版本>.dmg / .zip
 //
 // 为什么自带运行时：用户不该先理解「源码 / Node / 本地服务 / 浏览器」这一串。
 // 代价是体积（内置 node 约 108MB，只依赖系统库，可独立分发）。
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access, chmod, copyFile, cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, readFile, rm, stat, writeFile, symlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -144,6 +145,29 @@ try {
 }
 
 // ---------- 8. 可选：分发用 zip ----------
+/* ---------- 8a. 可选：分发用 DMG ----------
+   新手拿到 dmg 该做的事只有一件：把 CoEditor 拖进旁边的「应用程序」。
+   这是 Mac 上不需要任何解释的安装方式，比教人解压 zip 稳。 */
+let dmgPath = null;
+if (argv.includes("--dmg")) {
+  dmgPath = join(DIST, `CoEditor-${VERSION}.dmg`);
+  const stage = join(DIST, "dmg-stage");
+  await rm(stage, { recursive: true, force: true });
+  await mkdir(stage, { recursive: true });
+  await cp(APP, join(stage, "CoEditor.app"), { recursive: true });
+  await symlink("/Applications", join(stage, "Applications"));   // 拖拽目标
+  // 附带一句人话说明，免得用户猜
+  await writeFile(join(stage, "先读我.txt"),
+    "安装：把左边的 CoEditor 拖到右边的「应用程序」里，然后打开它。\n"
+    + "第一次打开会让你选一个文件夹，选好就能开始批注。文件都在你自己电脑上。\n\n"
+    + "（CoEditor 开源、MIT 许可：https://github.com/DHLbigmonster/CoEditor）\n", "utf8");
+  await run("hdiutil", ["create", "-volname", "CoEditor", "-srcfolder", stage,
+    "-ov", "-format", "UDZO", dmgPath]);
+  await rm(stage, { recursive: true, force: true });
+  const ds = await stat(dmgPath);
+  log(`打包 ${dmgPath}（${Math.round(ds.size / 1024 / 1024)}MB）`);
+}
+
 let zipPath = null;
 if (WANT_ZIP) {
   zipPath = join(DIST, `CoEditor-${VERSION}.zip`);

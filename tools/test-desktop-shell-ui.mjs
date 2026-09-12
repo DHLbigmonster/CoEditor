@@ -7,7 +7,7 @@
 import { openPage, sleep } from "./p0-harness.mjs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, rm, mkdir, writeFile } from "node:fs/promises";
+import { readFile, rm, mkdir, writeFile, lstat, readlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ const APP = join(REPO, "dist", "CoEditor.app");
 const SUPPORT = join(homedir(), "Library", "Application Support", "CoEditor");
 const OUT = "/tmp/coeditor-p0/evidence";
 const PICKED = "/tmp/coeditor-dsk/picked";
+const DESKTOP_LINK = join(homedir(), "Desktop", "CoEditor.app");
 
 const log = [];
 const record = (step, ok, detail, kind) => {
@@ -108,6 +109,40 @@ try {
   const tree = await page.eval(`return document.querySelectorAll('#tree [data-path]').length`);
   record("刷新后看到的是用户自己文件夹里的文件", tree > 0, `文件数=${tree}`);
   await page.shot(`${OUT}/desktop-after-pick.png`);
+
+  /* ================= 路径三：首次打开就自动放一个桌面入口 =================
+     这条是「别人下载完要自己做什么」的验收：勾选框默认勾上，点一下主按钮，
+     桌面上就该出现一个能双击的 CoEditor。 */
+  await page.close();
+  await rm(DESKTOP_LINK, { recursive: true, force: true }); // 从干净状态开始（这是本测试自己管理的入口）
+  port = await freshLaunch();
+  record("第三次以首次运行启动（验证桌面入口）", Boolean(port), port ? `端口 ${port}` : "没起来");
+  if (!port) throw new Error("第三条路径没起来");
+  page = await openPage(`http://127.0.0.1:${port}/`, { width: 1440, height: 900 });
+  await sleep(1600);
+
+  const shortcutUi = await page.eval(`
+    const cb = document.querySelector('[data-dsk="shortcut"]');
+    const row = document.querySelector('[data-dsk="shortcut-row"]');
+    return { has: !!cb, checked: cb ? cb.checked : null, rowHidden: row ? row.hasAttribute('hidden') : null,
+             label: row ? row.textContent.trim() : null };`);
+  record("首次引导里有「在桌面放一个快捷方式」且默认勾选", shortcutUi.has && shortcutUi.checked === true && shortcutUi.rowHidden === false,
+    JSON.stringify(shortcutUi));
+
+  await page.eval(`[...document.querySelectorAll('[data-dsk]')].find(b => b.dataset.dsk === 'sample').click(); return 1;`);
+  let created = false;
+  for (let i = 0; i < 25; i += 1) {
+    await sleep(300);
+    try { const s = await lstat(DESKTOP_LINK); created = true; if (s) break; } catch { /* 还没出现 */ }
+  }
+  record("点一下主按钮后，桌面上真的出现入口", created, DESKTOP_LINK);
+  let linkTarget = null;
+  try { linkTarget = (await readlink(DESKTOP_LINK)); } catch { /* 不是符号链接 */ }
+  record("入口指向的是当前这个 app 包", Boolean(linkTarget && linkTarget.endsWith("CoEditor.app")), linkTarget || "取不到");
+
+  const state = await fetch(`http://127.0.0.1:${port}/api/app/desktop-shortcut`).then((r) => r.json()).catch(() => null);
+  record("再问一次时接口说「已经有了」，不会重复创建", Boolean(state && state.exists), JSON.stringify(state));
+  await page.shot(`${OUT}/desktop-shortcut-created.png`);
 
   await page.close();
 } catch (error) {

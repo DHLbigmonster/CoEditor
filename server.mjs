@@ -1,7 +1,7 @@
 import http from "node:http";
 import { inspectOffice, patchOffice } from './lib/office-text.mjs';
-import { readFileSync } from "node:fs";
-import { readFile, writeFile, mkdir, stat, readdir, rename, realpath } from "node:fs/promises";
+import { readFileSync, existsSync } from "node:fs";
+import { readFile, writeFile, mkdir, stat, readdir, rename, realpath, symlink } from "node:fs/promises";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,16 @@ const PPTX_JOBS = new Map();
 const AGENT_READS = { count: 0, lastAt: 0 };
 // 首次引导是否还要显示。启动时由启动器决定，用户一旦做出选择就置 false（进程内状态，不需要落盘）
 let FIRST_RUN = process.env.COEDITOR_FIRST_RUN === "1";
+
+/** 当前进程是不是跑在 CoEditor.app 里；是的话返回 app 包路径（用于"在桌面放快捷方式"）。
+    不能直接信 cwd，用户在 Finder 双击时 cwd 是 / 或家目录。 */
+function bundleRoot() {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url)); // <bundle>/Contents/Resources/app
+    const candidate = resolve(here, "..", "..", "..");
+    return candidate.endsWith(".app") && existsSync(candidate) ? candidate : null;
+  } catch { return null; }
+}
 async function queueRequest(timeoutMs = QUEUE_WAIT_TIMEOUT_MS) {
  const previous = requestQueue; let release;
  requestQueue = new Promise(resolve => { release = resolve; });
@@ -1006,6 +1016,39 @@ const requestHandler = async (req, res) => {
     if (url.pathname === "/api/app/first-run-done" && req.method === "POST") {
       FIRST_RUN = false;
       return send(200, JSON.stringify({ ok: true, firstRun: false }));
+    }
+
+    /* 在桌面放一个能双击的入口。
+       用**符号链接**而不是 Finder 别名：不需要「控制 Finder」的自动化授权（不会弹权限框），
+       而且它指向的 app 更新/重新打包后，桌面入口自动跟着新，不用重新创建。
+       open 和 Finder 双击都走 LaunchServices，实测符号链接可以正常启动。 */
+    if (url.pathname === "/api/app/desktop-shortcut" && req.method === "POST") {
+      if (process.platform !== "darwin") return send(501, JSON.stringify({ error: "macos-only" }));
+      const bundle = bundleRoot();
+      if (!bundle) return send(501, JSON.stringify({ error: "not-a-bundle", detail: "命令行启动时没有可放到桌面的 app" }));
+      const desktop = join(homedir(), "Desktop");
+      const link = join(desktop, "CoEditor.app");
+      // 本身就在桌面上（用户直接双击桌面的那份）→ 不需要再建一个指向自己的入口
+      if (dirname(bundle) === desktop) return send(200, JSON.stringify({ ok: true, already: true, how: "already-on-desktop", path: bundle }));
+      if (existsSync(link)) return send(200, JSON.stringify({ ok: true, already: true, how: "exists", path: link }));
+      if (!existsSync(desktop)) return send(400, JSON.stringify({ error: "no-desktop" }));
+      try {
+        await symlink(bundle, link);
+        return send(200, JSON.stringify({ ok: true, how: "symlink", path: link, target: bundle }));
+      } catch (err) {
+        return send(500, JSON.stringify({ error: "shortcut-failed", detail: String(err && err.message || err).slice(0, 140) }));
+      }
+    }
+    if (url.pathname === "/api/app/desktop-shortcut" && req.method === "GET") {
+      const desktop = join(homedir(), "Desktop");
+      const link = join(desktop, "CoEditor.app");
+      const bundle = bundleRoot();
+      return send(200, JSON.stringify({
+        supported: process.platform === "darwin" && Boolean(bundle),
+        exists: Boolean(bundle && dirname(bundle) === desktop) || existsSync(link),
+        onDesktop: Boolean(bundle && dirname(bundle) === desktop),
+        path: existsSync(link) ? link : null,
+      }));
     }
     if (url.pathname === "/api/app/quit" && req.method === "POST") {
       // 「退出 CoEditor」：停止后台服务。先回响应再退，避免浏览器拿到连接错误。

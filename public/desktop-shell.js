@@ -9,6 +9,7 @@
 //   2. 桌面模式：在左下角给一个明确的「退出 CoEditor」，停掉后台服务
 (function () {
   const api = (path, options) => fetch(path, options).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const log = (...args) => { try { console.debug("[CoEditor 桌面版]", ...args); } catch { /* 忽略 */ } };
 
   /* ---------------- 样式：内联注入，避免动别人的样式文件 ---------------- */
   const style = document.createElement("style");
@@ -33,6 +34,10 @@
     border: 1px solid #dedfd5; background: #fffefa; color: #5b6156; font: inherit; font-size: 11px; }
   .dsk-quit:hover { background: #fff; border-color: #cfd1c6; color: #8a3b2e; }
   .dsk-note { margin-top: 14px; font-size: 12px; color: #8b8f87; }
+  .dsk-check { display: flex; align-items: center; gap: 8px; margin-top: 14px;
+    font-size: 13px; color: #62675f; cursor: pointer; }
+  .dsk-check[hidden] { display: none; }
+  .dsk-check input { margin: 0; accent-color: #42664d; }
   body.paper-dark .dsk-card { background: #221f19; border-color: #3a352c; color: #e6e1d6; }
   body.paper-dark .dsk-card h2 { color: #e6e1d6; }
   body.paper-dark .dsk-card p { color: #b3aea2; }
@@ -51,9 +56,18 @@
           <button class="dsk-btn primary" data-dsk="pick">选择文件夹</button>
           <button class="dsk-btn" data-dsk="sample">先看示例</button>
         </div>
+        <label class="dsk-check" data-dsk="shortcut-row">
+          <input type="checkbox" data-dsk="shortcut" checked />
+          <span>在桌面放一个快捷方式，以后双击就能打开</span>
+        </label>
         <div class="dsk-note" data-dsk="note">示例是随应用附带的合成文档，可以随便试。</div>
       </div>`;
     document.body.appendChild(box);
+
+    // 桌面上已经有入口、或当前不支持时，这一行就不出现（不承诺做不到的事）
+    api("/api/app/desktop-shortcut").then((state) => {
+      if (!state || !state.supported || state.exists) box.querySelector('[data-dsk="shortcut-row"]')?.setAttribute("hidden", "");
+    });
 
     const note = box.querySelector('[data-dsk="note"]');
     box.addEventListener("click", async (event) => {
@@ -63,6 +77,7 @@
         box.hidden = true;
         // 也要在服务端记一笔：否则刷新页面（或下次打开）引导会又弹回来
         api("/api/app/first-run-done", { method: "POST" });
+        maybeCreateShortcut(box);
         return;
       }
 
@@ -85,9 +100,40 @@
         note.textContent = "打开失败，可能没有读取权限。换一个文件夹试试。";
         return;
       }
+      await maybeCreateShortcut(box);
       note.textContent = "已打开，正在载入…";
       location.reload();
     });
+  }
+
+  /** 勾了「在桌面放快捷方式」就在服务端建一个（符号链接，不弹权限框） */
+  async function maybeCreateShortcut(box) {
+    const cb = box.querySelector('[data-dsk="shortcut"]');
+    if (!cb || !cb.checked) return;
+    const res = await api("/api/app/desktop-shortcut", { method: "POST" });
+    if (res && res.ok) log(`桌面快捷方式：${res.how}`);
+  }
+
+  /* ---------------- 之后想补一个桌面入口 ----------------
+     只在「支持、且桌面上确实还没有」时出现；建过就自己消失，不占地方。 */
+  async function addShortcutEntry() {
+    const state = await api("/api/app/desktop-shortcut");
+    if (!state || !state.supported || state.exists) return;
+    const foot = document.querySelector(".rail-foot");
+    if (!foot || foot.querySelector(".dsk-shortcut")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dsk-quit dsk-shortcut";
+    btn.title = "在桌面放一个 CoEditor 入口，以后双击就能打开";
+    btn.textContent = "⌘ 放到桌面";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "正在创建…";
+      const res = await api("/api/app/desktop-shortcut", { method: "POST" });
+      if (res && res.ok) { btn.textContent = "✓ 已放到桌面"; setTimeout(() => btn.remove(), 2600); }
+      else { btn.disabled = false; btn.textContent = "⌘ 放到桌面（失败，可重试）"; }
+    });
+    foot.appendChild(btn);
   }
 
   /* ---------------- 「退出 CoEditor」 ---------------- */
@@ -125,6 +171,11 @@
       const show = () => showFirstRun();
       if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", show, { once: true });
       else show();
+    } else {
+      // 不是第一次了：如果桌面上还没有入口，给一个补建的按钮（建过就不出现）
+      const add = () => addShortcutEntry();
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", add, { once: true });
+      else add();
     }
   })();
 })();
