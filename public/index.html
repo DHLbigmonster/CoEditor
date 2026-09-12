@@ -36,13 +36,18 @@
     </button>
     <div id="agent-pop" class="agent-pop" hidden>
       <div class="ap-head"><b>连接 Agent</b><button id="agent-close" class="icon" type="button" title="关闭">✕</button></div>
-      <p id="agent-status" class="ap-status">还没有 Agent 读取过这份工作区</p>
-      <p class="ap-note">批注保存在本机 <code>.marginalia/annotations.json</code>，不经过任何服务器。已接入的 Agent 通过 MCP 读取，跨会话仍然有效。</p>
-      <pre id="agent-snippet" class="ap-code"></pre>
+      <p id="agent-status" class="ap-status">还没有 AI 助手读过这份工作区</p>
+      <p class="ap-note">批注只保存在你自己电脑上。接上 AI 助手之后，它每次改稿都能读到这些意见，不用再复制粘贴。</p>
       <div class="ap-actions">
-        <button id="agent-copy" class="chip" type="button">复制接入配置</button>
-        <button id="agent-check" class="chip" type="button">重新检测</button>
+        <button id="agent-copy" class="chip" type="button">复制配置</button>
+        <button id="agent-check" class="chip" type="button">检查一下</button>
       </div>
+      <p class="ap-help">把复制的内容贴到你的 AI 助手的设置里即可。看不到的话，问它「怎么加 MCP 服务」，它知道。</p>
+      <!-- 配置本身不用读，点「复制配置」就好；需要核对的人再展开。 -->
+      <details class="ap-more">
+        <summary>查看要粘贴的配置</summary>
+        <pre id="agent-snippet" class="ap-code"></pre>
+      </details>
     </div>
   </div>
 </aside>
