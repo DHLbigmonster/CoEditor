@@ -135,6 +135,17 @@ body.rail-hidden #rail { margin-left: calc(-1 * var(--rail-width, 224px)); }
 .agent-pop .ap-more[open] > summary::before { content: "▾ "; }
 .agent-pop .ap-more > summary:hover { color: #33362f; }
 .agent-pop .ap-more > summary:focus-visible { outline: 2px solid #6b8f72; outline-offset: 2px; }
+
+/* ---------- 新手用不到的两个进阶动作（用户实测：不知道有什么作用）----------
+   「把修改指令交给 Agent」：它自己的说明就写着「接了 MCP 的 Agent 会自己读约束，不需要此步」，
+     它是"没接 MCP 时的手动替代方案"。
+   「归档本轮，开新批次」：内部记账，用户不需要知道"批次/轮"这回事。
+   按钮保留在 DOM 里（app.js 的绑定不受影响），删掉下面这行即可恢复。 */
+#btn-edit-ask,
+#btn-round { display: none; }
+
+/* 这两个按钮上面那条分隔线也一起收掉，免得底下留一条孤零零的横线 */
+.menu-sep:has(+ #btn-edit-ask) { display: none; }
 body.paper-dark .agent-pop { background: #221f19; border-color: #3a352c; color: #cfcabd; }
 body.paper-dark .agent-pop .ap-head b, body.paper-dark .agent-pop .ap-status { color: #e6e1d6; }
 body.paper-dark .agent-pop .ap-code { background: #2b271f; color: #cfcabd; }
