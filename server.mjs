@@ -982,6 +982,29 @@ const requestHandler = async (req, res) => {
       }
     }
 
+    /* ---------- 桌面启动器（CoEditor.app）用得到的两个端点 ----------
+       只有被启动器拉起时才认桌面模式；命令行起的服务不受影响。 */
+    if (url.pathname === "/api/app/info" && req.method === "GET") {
+      const desktop = process.env.COEDITOR_DESKTOP === "1";
+      return send(200, JSON.stringify({
+        desktop,
+        port: PORT,
+        pid: process.pid,
+        root: ROOT,
+        version: APP_VERSION,
+        // 首次运行：桌面模式启动时没有可用的上次文件夹，UI 据此显示「选择文件夹 / 先看示例」
+        firstRun: desktop && process.env.COEDITOR_FIRST_RUN === "1",
+        listening: `http://127.0.0.1:${PORT}/`,
+      }));
+    }
+    if (url.pathname === "/api/app/quit" && req.method === "POST") {
+      // 「退出 CoEditor」：停止后台服务。先回响应再退，避免浏览器拿到连接错误。
+      send(200, JSON.stringify({ ok: true, quitting: true, pid: process.pid }));
+      setTimeout(() => { try { server.close(() => process.exit(0)); } catch { process.exit(0); } }, 60);
+      setTimeout(() => process.exit(0), 1200).unref();
+      return;
+    }
+
     /* Agent 接入状态：UI 只说「有没有 Agent 真的读过」，不替用户假装已连接。
        判据是「这个接口被读过」这个事实本身，而不是「配置文件写没写」。 */
     if (url.pathname === "/api/agent-status") {

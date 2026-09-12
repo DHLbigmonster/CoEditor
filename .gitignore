@@ -12,3 +12,5 @@ sample/*.pptx
 **/.marginalia/pptx-cache/
 # 存储锁（临时文件）
 **/.marginalia/*.lock
+# 打包产物（CoEditor.app 约 116MB，不入库，用 tools/build-mac-app.mjs 生成）
+dist/
