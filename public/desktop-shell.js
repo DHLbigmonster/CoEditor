@@ -59,7 +59,12 @@
     box.addEventListener("click", async (event) => {
       const act = event.target.getAttribute?.("data-dsk");
       if (!act) return;
-      if (act === "sample") { box.hidden = true; return; }
+      if (act === "sample") {
+        box.hidden = true;
+        // 也要在服务端记一笔：否则刷新页面（或下次打开）引导会又弹回来
+        api("/api/app/first-run-done", { method: "POST" });
+        return;
+      }
 
       const pick = box.querySelector('[data-dsk="pick"]');
       pick.disabled = true;

@@ -22,6 +22,8 @@ const PPTX_JOBS = new Map();
 
 // Agent 读取留痕：只用于 UI 显示「已连接 / 等待读取」，不参与任何业务逻辑
 const AGENT_READS = { count: 0, lastAt: 0 };
+// 首次引导是否还要显示。启动时由启动器决定，用户一旦做出选择就置 false（进程内状态，不需要落盘）
+let FIRST_RUN = process.env.COEDITOR_FIRST_RUN === "1";
 async function queueRequest(timeoutMs = QUEUE_WAIT_TIMEOUT_MS) {
  const previous = requestQueue; let release;
  requestQueue = new Promise(resolve => { release = resolve; });
@@ -620,6 +622,7 @@ const requestHandler = async (req, res) => {
       if (!info || !info.isDirectory()) return send(400, JSON.stringify({ error: "not a directory" }));
       await setVault(next); // 先完成真实路径切换再响应，避免响应后短暂窗口内请求打到旧 ROOT
       await noteRecent(ROOT); // 记录归一化后的路径：与启动记录同基，去重才不会出现同目录两条
+      FIRST_RUN = false; // 用户已经选了文件夹，首次引导不该再出现
       return send(200, JSON.stringify({ ok: true, root: ROOT, tree: await listTree() }));
     }
 
@@ -992,10 +995,17 @@ const requestHandler = async (req, res) => {
         pid: process.pid,
         root: ROOT,
         version: APP_VERSION,
-        // 首次运行：桌面模式启动时没有可用的上次文件夹，UI 据此显示「选择文件夹 / 先看示例」
-        firstRun: desktop && process.env.COEDITOR_FIRST_RUN === "1",
+        // 首次运行：桌面模式启动时没有可用的上次文件夹，UI 据此显示「选择文件夹 / 先看示例」。
+        // 注意这是**可变状态**：用户一旦选了文件夹（或点了"先看示例"）就该永久消失，
+        // 否则选完文件夹触发的刷新会把引导又弹回来。
+        firstRun: desktop && FIRST_RUN,
         listening: `http://127.0.0.1:${PORT}/`,
       }));
+    }
+    // 用户做过选择（选了文件夹，或明确说"先看示例"）→ 引导不再出现
+    if (url.pathname === "/api/app/first-run-done" && req.method === "POST") {
+      FIRST_RUN = false;
+      return send(200, JSON.stringify({ ok: true, firstRun: false }));
     }
     if (url.pathname === "/api/app/quit" && req.method === "POST") {
       // 「退出 CoEditor」：停止后台服务。先回响应再退，避免浏览器拿到连接错误。
